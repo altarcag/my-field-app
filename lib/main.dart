@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -9,8 +10,12 @@ import 'package:flutter_map_cache/flutter_map_cache.dart';
 import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'field_projects.dart';
+import 'field_log.dart';
+import 'field_log_widgets.dart';
+import 'center_target.dart';
 import 'map_library_page.dart';
 import 'offline_maps.dart';
 import 'online_maps.dart';
@@ -74,6 +79,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   String? _activeTrackId;
   bool _isLoadingProjects = true;
   bool _isRecording = false;
+  bool _centerMenuOpen = false;
+  bool _isAddingLog = false;
+  bool _isExporting = false;
 
   List<InstalledMap> _installedMaps = [];
   InstalledMap? _activeOfflineMap;
@@ -110,7 +118,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
-      unawaited(_saveProjects());
+      if (!_isLoadingProjects) unawaited(_saveProjects());
     }
   }
 
@@ -192,6 +200,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _activeProjectId = state.activeProjectId;
       _isLoadingProjects = false;
     });
+    await _recoverPhotoLog();
   }
 
   Future<void> _saveProjects() =>
@@ -397,7 +406,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               if (_projects.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 30),
-                  child: Text('Create a project before recording a GPS track.'),
+                  child: Text('Create a project to collect routes and field logs.'),
                 )
               else
                 Flexible(
@@ -414,7 +423,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                         title: Text(project.name),
                         subtitle: Text(
                           '${project.tracks.length} tracks · '
-                          '${project.pointCount} GPS points',
+                          '${project.pointCount} GPS points · ${project.logs.length} logs',
                         ),
                         trailing: selected ? const Icon(Icons.check) : null,
                         onTap: () {
@@ -433,10 +442,138 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (createNew == true && mounted) await _createProject();
   }
 
+  Future<void> _addFieldLog(FieldLogKind kind, LatLng target) async {
+    if (_isAddingLog || _isLoadingProjects) return;
+    setState(() {
+      _centerMenuOpen = false;
+      _isAddingLog = true;
+    });
+    try {
+      if (_activeProject == null) await _openProjectPicker();
+      if (!mounted) return;
+      final project = _activeProject;
+      if (project == null) return;
+      // Both the coordinate and project are captured before any asynchronous UI.
+      final draft = await showDialog<FieldLogDraft>(
+        context: context,
+        builder: (_) => FieldLogDialog(
+          kind: kind, projectName: project.name,
+          latitude: target.latitude, longitude: target.longitude,
+        ),
+      );
+      if (draft == null || !mounted) return;
+      final now = DateTime.now().toUtc();
+      final log = FieldLog(
+        id: 'log-${now.microsecondsSinceEpoch}', kind: kind,
+        latitude: target.latitude, longitude: target.longitude,
+        title: draft.title, notes: draft.notes, createdAt: now,
+      );
+      if (kind == FieldLogKind.photo) {
+        final pending = PendingPhotoLog(projectId: project.id, log: log);
+        await _fieldProjectStore.savePendingPhoto(pending);
+        final picked = await ImagePicker().pickImage(
+          source: draft.source, imageQuality: 92, requestFullMetadata: false,
+        );
+        if (picked == null) {
+          await _fieldProjectStore.clearPendingPhoto();
+          return;
+        }
+        await _finishPhotoLog(pending, picked);
+      } else {
+        await _saveFieldLog(project.id, log);
+      }
+      _showMessage('Saved to ${project.name}');
+    } catch (error) {
+      _showMessage('Could not save log: $error');
+    } finally {
+      if (mounted) setState(() => _isAddingLog = false);
+    }
+  }
+
+  Future<void> _saveFieldLog(String projectId, FieldLog log) async {
+    if (!mounted) return;
+    final index = _projects.indexWhere((project) => project.id == projectId);
+    if (index < 0) throw StateError('The original field project is unavailable');
+    // Read the latest project here so GPS points recorded during entry survive.
+    final project = _projects[index];
+    final logs = [...project.logs.where((entry) => entry.id != log.id), log];
+    final updated = [..._projects];
+    updated[index] = project.withLogs(logs, DateTime.now().toUtc());
+    setState(() => _projects = updated);
+    await _saveProjects();
+  }
+
+  Future<void> _finishPhotoLog(PendingPhotoLog pending, XFile photo) async {
+    if (!mounted) return;
+    final relativePath = await _fieldProjectStore.importPhoto(
+      pending.projectId, pending.log.id, File(photo.path),
+    );
+    if (!mounted) return;
+    await _saveFieldLog(pending.projectId, pending.log.withPhoto(relativePath));
+    await _fieldProjectStore.clearPendingPhoto();
+  }
+
+  Future<void> _recoverPhotoLog() async {
+    if (!Platform.isAndroid || !mounted) return;
+    setState(() => _isAddingLog = true);
+    try {
+      final response = await ImagePicker().retrieveLostData();
+      final pending = await _fieldProjectStore.loadPendingPhoto();
+      if (response.isEmpty) return;
+      final files = response.files;
+      if (pending != null && files != null && files.isNotEmpty) {
+        await _finishPhotoLog(pending, files.first);
+        _showMessage('Recovered photo in its original field project');
+      } else if (response.exception != null) {
+        _showMessage('Photo capture was interrupted. Please try again.');
+      } else if (files != null && files.isNotEmpty) {
+        _showMessage('Photo location could not be recovered. Please add it again.');
+      }
+    } catch (error) {
+      _showMessage('Could not recover photo: $error');
+    } finally {
+      if (mounted) setState(() => _isAddingLog = false);
+    }
+  }
+
+  Future<void> _viewFieldLog(FieldLog log) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(log.title),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (log.photoPath != null) ...[
+              SizedBox(
+                width: 300, height: 300,
+                child: InteractiveViewer(
+                  maxScale: 5,
+                  child: FieldLogPhoto(store: _fieldProjectStore, path: log.photoPath!),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (log.notes.isNotEmpty) ...[
+              Text(log.notes),
+              const SizedBox(height: 12),
+            ],
+            SelectableText('${log.latitude.toStringAsFixed(6)}, '
+                '${log.longitude.toStringAsFixed(6)}'),
+            Text(log.createdAt.toLocal().toString().split('.').first),
+          ],
+        ),
+      ),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+    ),
+  );
+
   Future<void> _exportActiveProject() async {
     final project = _activeProject;
-    if (project == null || project.pointCount == 0) {
-      _showMessage('Record at least one GPS point before exporting.');
+    if (_isExporting) return;
+    if (project == null || !project.hasContent) {
+      _showMessage('Add a log or record GPS points before exporting.');
       return;
     }
 
@@ -452,7 +589,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.folder_zip_outlined),
               title: Text('KMZ'),
-              subtitle: Text('Compressed and ready for My Field Atlas'),
+              subtitle: Text('Everything: routes, photos, waypoints, and text'),
             ),
           ),
           SimpleDialogOption(
@@ -462,13 +599,20 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.code_outlined),
               title: Text('KML'),
-              subtitle: Text('Uncompressed Google Earth document'),
+              subtitle: Text('GPS routes only — no photos or field logs'),
             ),
           ),
         ],
       ),
     );
-    if (format == null) return;
+    if (format == null || !mounted) return;
+    // Snapshot at confirmation time, including points captured while choosing.
+    final snapshot = _projects.firstWhere((item) => item.id == project.id);
+    if (format == ProjectExportFormat.kml && snapshot.pointCount == 0) {
+      _showMessage('This project has no GPS route yet. Use KMZ to export its logs.');
+      return;
+    }
+    setState(() => _isExporting = true);
 
     final fileName = projectFileName(project, format);
     try {
@@ -477,11 +621,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         fileName: fileName,
         type: FileType.custom,
         allowedExtensions: [format.name],
-        bytes: projectExportBytes(project, format),
+        bytes: await projectExportBytes(snapshot, format, store: _fieldProjectStore),
       );
       if (result != null) _showMessage('Exported $fileName');
     } catch (error) {
       _showMessage('Could not export project: $error');
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
     }
   }
 
@@ -655,7 +801,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     MultiFingerGesture.pinchZoom |
                     MultiFingerGesture.pinchMove,
               ),
-              onPositionChanged: (camera, _) {
+              onTap: (_, _) {
+                if (_centerMenuOpen) setState(() => _centerMenuOpen = false);
+              },
+              onPositionChanged: (camera, hasGesture) {
+                if (hasGesture && _centerMenuOpen) {
+                  setState(() => _centerMenuOpen = false);
+                }
                 if ((_mapRotation.value - camera.rotation).abs() > 0.05) {
                   _mapRotation.value = camera.rotation;
                 }
@@ -678,6 +830,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                           borderColor: Colors.white,
                           borderStrokeWidth: 1.5,
                         ),
+                  ],
+                ),
+              if (activeProject != null)
+                MarkerLayer(
+                  rotate: true,
+                  markers: [
+                    for (final log in activeProject.logs)
+                      Marker(
+                        point: LatLng(log.latitude, log.longitude),
+                        width: log.kind == FieldLogKind.text ? 170 : 120,
+                        height: log.kind == FieldLogKind.photo ? 84 : 64,
+                        child: FieldLogMarker(
+                          log: log, store: _fieldProjectStore,
+                          onTap: () => _viewFieldLog(log),
+                        ),
+                      ),
                   ],
                 ),
               if (point != null) ...[
@@ -704,6 +872,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   ],
                 ),
               ],
+              CenterTargetLayer(
+                position: point,
+                menuOpen: _centerMenuOpen,
+                onToggleMenu: () {
+                  if (_isAddingLog || _isLoadingProjects) return;
+                  setState(() => _centerMenuOpen = !_centerMenuOpen);
+                },
+                onCreate: _addFieldLog,
+              ),
             ],
           ),
           Positioned(
@@ -713,7 +890,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 12, 76, 12),
               child: _StatusPanel(
                 position: position,
                 status: _locationStatus,
@@ -735,7 +912,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           ),
           Positioned(
             left: 12,
-            bottom: 12,
+            right: 88,
+            bottom: 24,
             child: SafeArea(
               child: _ProjectTrackingControl(
                 project: activeProject,
@@ -743,6 +921,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 isRecording: _isRecording,
                 onProjects: _openProjectPicker,
                 onExport: _exportActiveProject,
+                isExporting: _isExporting,
                 onToggleRecording: _toggleRecording,
               ),
             ),
@@ -791,6 +970,7 @@ class _ProjectTrackingControl extends StatelessWidget {
     required this.isRecording,
     required this.onProjects,
     required this.onExport,
+    required this.isExporting,
     required this.onToggleRecording,
   });
 
@@ -799,6 +979,7 @@ class _ProjectTrackingControl extends StatelessWidget {
   final bool isRecording;
   final VoidCallback onProjects;
   final VoidCallback onExport;
+  final bool isExporting;
   final VoidCallback onToggleRecording;
 
   @override
@@ -851,9 +1032,11 @@ class _ProjectTrackingControl extends StatelessWidget {
                               if (!isLoading)
                                 Text(
                                   project == null
-                                      ? 'Required for route logging'
+                                      ? 'Routes and field logs'
                                       : '${project!.tracks.length} tracks · '
-                                            '${project!.pointCount} points',
+                                            '${project!.logs.length} logs',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                             ],
@@ -868,11 +1051,12 @@ class _ProjectTrackingControl extends StatelessWidget {
               ),
               const SizedBox(width: 2),
               IconButton(
-                onPressed: (project?.pointCount ?? 0) > 0
-                    ? onExport
-                    : null,
+                onPressed: (project?.hasContent ?? false) && !isExporting
+                    ? onExport : null,
                 tooltip: 'Export project',
-                icon: const Icon(Icons.file_download_outlined),
+                icon: isExporting
+                    ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.file_download_outlined),
               ),
               const SizedBox(width: 2),
               FilledButton.icon(

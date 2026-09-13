@@ -1,7 +1,7 @@
 name: my_field_atlas_android
 description: "An offline-first field mapping and GPS application."
 publish_to: 'none'
-version: 0.7.0+7
+version: 0.8.0+8
 
 environment:
   sdk: ^3.13.3
@@ -16,6 +16,7 @@ dependencies:
   flutter_map_mbtiles: ^1.0.4
   geolocator: ^14.0.3
   http_cache_file_store: ^2.0.2
+  image_picker: ^1.2.3
   latlong2: ^0.9.1
   path: ^1.9.1
   path_provider: ^2.1.6
