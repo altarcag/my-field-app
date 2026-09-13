@@ -341,7 +341,7 @@ class _EmptyCard extends StatelessWidget {
             Icon(icon),
             const SizedBox(width: 14),
             Expanded(child: Text(text)),
-            if (action != null) action!,
+            ?action,
           ],
         ),
       ),
