@@ -6,7 +6,7 @@ Flutter.
 ## Current features
 
 - Live high-accuracy GPS position, altitude, and accuracy radius
-- Online OpenStreetMap layer with browse caching
+- On-map switch between online OpenStreetMap and Esri World Imagery
 - Multiple offline raster MBTiles maps
 - Import MBTiles through Android's file picker
 - Downloadable map catalogue backed by Cloudflare R2

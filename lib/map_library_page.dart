@@ -8,15 +8,19 @@ class MapLibraryPage extends StatefulWidget {
     required this.store,
     required this.installedMaps,
     required this.activeMapId,
+    required this.onlineStreetMapSelected,
     required this.onMapsChanged,
     required this.onActivate,
+    required this.onSelectOnlineStreetMap,
   });
 
   final OfflineMapStore store;
   final List<InstalledMap> installedMaps;
   final String? activeMapId;
+  final bool onlineStreetMapSelected;
   final ValueChanged<List<InstalledMap>> onMapsChanged;
   final Future<void> Function(InstalledMap?) onActivate;
+  final Future<void> Function() onSelectOnlineStreetMap;
 
   @override
   State<MapLibraryPage> createState() => _MapLibraryPageState();
@@ -25,6 +29,7 @@ class MapLibraryPage extends StatefulWidget {
 class _MapLibraryPageState extends State<MapLibraryPage> {
   late List<InstalledMap> _installed;
   late String? _activeId;
+  late bool _onlineStreetMapSelected;
   late Future<List<CatalogMap>> _catalog;
   String? _downloadingId;
   double? _progress;
@@ -35,6 +40,7 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
     super.initState();
     _installed = [...widget.installedMaps];
     _activeId = widget.activeMapId;
+    _onlineStreetMapSelected = widget.onlineStreetMapSelected;
     _catalog = widget.store.fetchCatalog();
   }
 
@@ -48,9 +54,24 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
     setState(() => _catalog = widget.store.fetchCatalog());
   }
 
-  Future<void> _activate(InstalledMap? map) async {
+  Future<void> _activate(InstalledMap map) async {
     await widget.onActivate(map);
-    if (mounted) setState(() => _activeId = map?.id);
+    if (mounted) {
+      setState(() {
+        _activeId = map.id;
+        _onlineStreetMapSelected = false;
+      });
+    }
+  }
+
+  Future<void> _selectOnlineStreetMap() async {
+    await widget.onSelectOnlineStreetMap();
+    if (mounted) {
+      setState(() {
+        _activeId = null;
+        _onlineStreetMapSelected = true;
+      });
+    }
   }
 
   Future<void> _import() async {
@@ -131,7 +152,7 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
     );
     if (confirmed != true) return;
 
-    if (_activeId == map.id) await _activate(null);
+    if (_activeId == map.id) await _selectOnlineStreetMap();
     await widget.store.remove(map, _installed);
     if (!mounted) return;
     setState(() => _installed.removeWhere((item) => item.id == map.id));
@@ -165,11 +186,11 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
           const SizedBox(height: 8),
           Card(
             child: ListTile(
-              onTap: () => _activate(null),
+              onTap: _selectOnlineStreetMap,
               leading: const Icon(Icons.public),
               title: const Text('OpenStreetMap'),
               subtitle: const Text('Online · previously viewed areas are cached'),
-              trailing: _activeId == null
+              trailing: _onlineStreetMapSelected
                   ? const Icon(Icons.check_circle, color: Color(0xFF26734D))
                   : null,
             ),

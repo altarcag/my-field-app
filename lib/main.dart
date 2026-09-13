@@ -9,6 +9,8 @@ import 'package:latlong2/latlong.dart';
 import 'map_library_page.dart';
 import 'offline_maps.dart';
 
+enum OnlineBasemap { street, satellite }
+
 void main() {
   runApp(const FieldApp());
 }
@@ -55,6 +57,7 @@ class _MapScreenState extends State<MapScreen> {
   List<InstalledMap> _installedMaps = [];
   InstalledMap? _activeOfflineMap;
   MbTilesTileProvider? _offlineTileProvider;
+  OnlineBasemap _onlineBasemap = OnlineBasemap.street;
   bool _isLoadingMaps = true;
 
   @override
@@ -209,6 +212,11 @@ class _MapScreenState extends State<MapScreen> {
     if (persist) await _offlineMaps.setActiveId(map?.id);
   }
 
+  Future<void> _selectOnlineBasemap(OnlineBasemap basemap) async {
+    await _activateMap(null);
+    if (mounted) setState(() => _onlineBasemap = basemap);
+  }
+
   void _mapsChanged(List<InstalledMap> maps) {
     if (mounted) setState(() => _installedMaps = [...maps]);
   }
@@ -220,8 +228,12 @@ class _MapScreenState extends State<MapScreen> {
           store: _offlineMaps,
           installedMaps: _installedMaps,
           activeMapId: _activeOfflineMap?.id,
+          onlineStreetMapSelected:
+              _activeOfflineMap == null && _onlineBasemap == OnlineBasemap.street,
           onMapsChanged: _mapsChanged,
           onActivate: _activateMap,
+          onSelectOnlineStreetMap: () =>
+              _selectOnlineBasemap(OnlineBasemap.street),
         ),
       ),
     );
@@ -241,6 +253,16 @@ class _MapScreenState extends State<MapScreen> {
         key: ValueKey(_activeOfflineMap!.id),
         tileProvider: provider,
         maxNativeZoom: 22,
+      );
+    }
+    if (_onlineBasemap == OnlineBasemap.satellite) {
+      return TileLayer(
+        key: const ValueKey('esri-world-imagery'),
+        urlTemplate:
+            'https://server.arcgisonline.com/ArcGIS/rest/services/'
+            'World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        userAgentPackageName: 'com.altarcag.my_field_atlas_android',
+        maxNativeZoom: 19,
       );
     }
     return TileLayer(
@@ -302,7 +324,9 @@ class _MapScreenState extends State<MapScreen> {
             bottom: 6,
             child: _Attribution(
               text: _activeOfflineMap?.attribution ??
-                  '© OpenStreetMap contributors',
+                  (_onlineBasemap == OnlineBasemap.satellite
+                      ? 'Imagery © Esri and contributors'
+                      : '© OpenStreetMap contributors'),
             ),
           ),
           SafeArea(
@@ -314,6 +338,20 @@ class _MapScreenState extends State<MapScreen> {
                 isLocating: _isLocating,
                 onRetry: _startLocation,
                 onSettings: _openRelevantSettings,
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 84, right: 12),
+                child: _BasemapSwitcher(
+                  selected: _activeOfflineMap == null
+                      ? _onlineBasemap
+                      : null,
+                  onSelected: _selectOnlineBasemap,
+                ),
               ),
             ),
           ),
@@ -349,6 +387,78 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BasemapSwitcher extends StatelessWidget {
+  const _BasemapSwitcher({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final OnlineBasemap? selected;
+  final ValueChanged<OnlineBasemap> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 3,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      color: Colors.white.withValues(alpha: 0.94),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BasemapButton(
+            icon: Icons.map_outlined,
+            label: 'Map',
+            selected: selected == OnlineBasemap.street,
+            onPressed: () => onSelected(OnlineBasemap.street),
+          ),
+          _BasemapButton(
+            icon: Icons.satellite_alt_outlined,
+            label: 'Satellite',
+            selected: selected == OnlineBasemap.satellite,
+            onPressed: () => onSelected(OnlineBasemap.satellite),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BasemapButton extends StatelessWidget {
+  const _BasemapButton({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onPressed,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        color: selected ? colorScheme.secondaryContainer : Colors.transparent,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18),
+            const SizedBox(width: 5),
+            Text(label, style: Theme.of(context).textTheme.labelMedium),
+          ],
+        ),
       ),
     );
   }
