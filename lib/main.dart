@@ -315,6 +315,10 @@ class _MapScreenState extends State<MapScreen> {
               interactionOptions: const InteractionOptions(
                 enableMultiFingerGestureRace: true,
                 rotationThreshold: 30,
+                rotationWinGestures:
+                    MultiFingerGesture.rotate |
+                    MultiFingerGesture.pinchZoom |
+                    MultiFingerGesture.pinchMove,
               ),
               onPositionChanged: (camera, _) {
                 if ((_mapRotation.value - camera.rotation).abs() > 0.05) {
