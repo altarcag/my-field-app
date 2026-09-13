@@ -9,7 +9,7 @@ import 'package:latlong2/latlong.dart';
 import 'map_library_page.dart';
 import 'offline_maps.dart';
 
-enum OnlineBasemap { street, satellite }
+enum OnlineBasemap { street, satellite, topographic }
 
 void main() {
   runApp(const FieldApp());
@@ -265,12 +265,31 @@ class _MapScreenState extends State<MapScreen> {
         maxNativeZoom: 19,
       );
     }
+    if (_onlineBasemap == OnlineBasemap.topographic) {
+      return TileLayer(
+        key: const ValueKey('opentopomap'),
+        urlTemplate: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
+        userAgentPackageName: 'com.altarcag.my_field_atlas_android',
+        maxNativeZoom: 17,
+      );
+    }
     return TileLayer(
       key: const ValueKey('openstreetmap'),
       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       userAgentPackageName: 'com.altarcag.my_field_atlas_android',
       maxNativeZoom: 19,
     );
+  }
+
+  String get _attributionText {
+    final offlineAttribution = _activeOfflineMap?.attribution;
+    if (offlineAttribution != null) return offlineAttribution;
+    return switch (_onlineBasemap) {
+      OnlineBasemap.street => '© OpenStreetMap contributors',
+      OnlineBasemap.satellite => 'Imagery © Esri and contributors',
+      OnlineBasemap.topographic =>
+        '© OpenTopoMap · © OpenStreetMap contributors',
+    };
   }
 
   @override
@@ -322,12 +341,7 @@ class _MapScreenState extends State<MapScreen> {
           Positioned(
             right: 8,
             bottom: 6,
-            child: _Attribution(
-              text: _activeOfflineMap?.attribution ??
-                  (_onlineBasemap == OnlineBasemap.satellite
-                      ? 'Imagery © Esri and contributors'
-                      : '© OpenStreetMap contributors'),
-            ),
+            child: _Attribution(text: _attributionText),
           ),
           SafeArea(
             child: Padding(
@@ -422,6 +436,12 @@ class _BasemapSwitcher extends StatelessWidget {
             label: 'Satellite',
             selected: selected == OnlineBasemap.satellite,
             onPressed: () => onSelected(OnlineBasemap.satellite),
+          ),
+          _BasemapButton(
+            icon: Icons.terrain_outlined,
+            label: 'Topo',
+            selected: selected == OnlineBasemap.topographic,
+            onPressed: () => onSelected(OnlineBasemap.topographic),
           ),
         ],
       ),
