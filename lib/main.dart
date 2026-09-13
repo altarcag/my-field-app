@@ -367,7 +367,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openProjectPicker() async {
-    await showModalBottomSheet<void>(
+    final createNew = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
@@ -385,10 +385,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     ),
                   ),
                   FilledButton.icon(
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      unawaited(_createProject());
-                    },
+                    onPressed: () => Navigator.pop(sheetContext, true),
                     icon: const Icon(Icons.create_new_folder_outlined),
                     label: const Text('New'),
                   ),
@@ -431,6 +428,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         ),
       ),
     );
+    if (createNew == true && mounted) await _createProject();
   }
 
   void _setLocationError(String message) {
