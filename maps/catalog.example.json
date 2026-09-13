@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "maps": [
+    {
+      "id": "example-region",
+      "name": "Example region",
+      "description": "Raster street map for offline use.",
+      "file": "maps/example-region.mbtiles",
+      "sizeBytes": 104857600,
+      "attribution": "© OpenStreetMap contributors"
+    }
+  ]
+}

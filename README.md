@@ -1,17 +1,41 @@
-# my_field_atlas_android
+# My Field App
 
-A new Flutter project.
+An Android-first, offline-capable field mapping and GPS application built with
+Flutter.
 
-## Getting Started
+## Current features
 
-This project is a starting point for a Flutter application.
+- Live high-accuracy GPS position, altitude, and accuracy radius
+- Online OpenStreetMap layer with browse caching
+- Multiple offline raster MBTiles maps
+- Import MBTiles through Android's file picker
+- Downloadable map catalogue backed by Cloudflare R2
+- Persistent map selection and on-device map deletion
 
-A few resources to get you started if this is your first Flutter project:
+## Map catalogue
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+The app reads its catalogue from:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+`https://pub-1d17b2dbfd3a4bbd9f02ac50c4a6775a.r2.dev/catalog.json`
+
+An example manifest is available at `maps/catalog.example.json`. Map file paths
+are resolved relative to `catalog.json`. Only HTTPS-hosted raster `.mbtiles`
+packages are currently accepted.
+
+The R2 bucket should use this layout:
+
+```text
+catalog.json
+maps/
+  central-anatolia.mbtiles
+  turkey-overview.mbtiles
+```
+
+## Development
+
+```bash
+flutter pub get
+flutter analyze
+flutter test
+flutter run
+```
