@@ -13,6 +13,7 @@ String projectFileName(FieldProject project, ProjectExportFormat format) {
       .toLowerCase()
       .replaceAll(RegExp(r'[\\/:*?"<>|&]+'), '-')
       .replaceAll(RegExp(r'\s+'), '-')
+      .replaceAll(RegExp(r'-+'), '-')
       .replaceAll(RegExp(r'^-+|-+$'), '');
   final baseName = safeName.isEmpty ? 'field-project' : safeName;
   return '$baseName.${format.name}';
