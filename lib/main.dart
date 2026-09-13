@@ -9,6 +9,7 @@ import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'field_projects.dart';
 import 'map_library_page.dart';
 import 'offline_maps.dart';
 import 'online_maps.dart';
@@ -51,18 +52,26 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const LatLng _turkeyCenter = LatLng(39.0, 35.0);
 
   final MapController _mapController = MapController();
   final ValueNotifier<double> _mapRotation = ValueNotifier(0);
   final OfflineMapStore _offlineMaps = OfflineMapStore();
+  final FieldProjectStore _fieldProjectStore = FieldProjectStore();
   StreamSubscription<Position>? _positionSubscription;
+  Timer? _trackSaveTimer;
 
   Position? _position;
   String _locationStatus = 'Starting GPS…';
   bool _isLocating = true;
   bool _didCenterOnFirstFix = false;
+
+  List<FieldProject> _projects = [];
+  String? _activeProjectId;
+  String? _activeTrackId;
+  bool _isLoadingProjects = true;
+  bool _isRecording = false;
 
   List<InstalledMap> _installedMaps = [];
   InstalledMap? _activeOfflineMap;
@@ -74,19 +83,33 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _onlineTileProvider = widget.onlineMapCache.providerFor(_onlineBasemap);
     _startLocation();
     _restoreMaps();
+    _restoreProjects();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _trackSaveTimer?.cancel();
+    if (!_isLoadingProjects) unawaited(_saveProjects());
     _positionSubscription?.cancel();
     _offlineTileProvider?.dispose();
     _onlineTileProvider.dispose();
     _mapRotation.dispose();
     _mapController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(_saveProjects());
+    }
   }
 
   Future<void> _startLocation() async {
@@ -143,12 +166,271 @@ class _MapScreenState extends State<MapScreen> {
       _isLocating = false;
       _locationStatus = 'GPS active';
     });
+    _recordPosition(position);
     if (!_didCenterOnFirstFix) {
       _didCenterOnFirstFix = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _centerOnPosition();
       });
     }
+  }
+
+  FieldProject? get _activeProject {
+    for (final project in _projects) {
+      if (project.id == _activeProjectId) return project;
+    }
+    return null;
+  }
+
+  Future<void> _restoreProjects() async {
+    final state = await _fieldProjectStore.load();
+    if (!mounted) return;
+    setState(() {
+      _projects = state.projects;
+      _activeProjectId = state.activeProjectId;
+      _isLoadingProjects = false;
+    });
+  }
+
+  Future<void> _saveProjects() =>
+      _fieldProjectStore.save(_projects, _activeProjectId);
+
+  TrackPoint _trackPoint(Position position) => TrackPoint(
+    latitude: position.latitude,
+    longitude: position.longitude,
+    altitude: position.altitude,
+    accuracy: position.accuracy,
+    capturedAt: DateTime.now().toUtc(),
+  );
+
+  void _recordPosition(Position position) {
+    if (!_isRecording || _activeProjectId == null || _activeTrackId == null) {
+      return;
+    }
+    final projectIndex = _projects.indexWhere(
+      (project) => project.id == _activeProjectId,
+    );
+    if (projectIndex < 0) return;
+    final project = _projects[projectIndex];
+    final trackIndex = project.tracks.indexWhere(
+      (track) => track.id == _activeTrackId,
+    );
+    if (trackIndex < 0) return;
+
+    final track = project.tracks[trackIndex];
+    final candidate = _trackPoint(position);
+    if (track.points.isNotEmpty) {
+      final previous = track.points.last;
+      final elapsed = candidate.capturedAt.difference(previous.capturedAt);
+      final distance = Geolocator.distanceBetween(
+        previous.latitude,
+        previous.longitude,
+        candidate.latitude,
+        candidate.longitude,
+      );
+      if (elapsed < const Duration(seconds: 2) ||
+          (distance < 2 && elapsed < const Duration(seconds: 10))) {
+        return;
+      }
+    }
+
+    final now = candidate.capturedAt;
+    final updatedTracks = [...project.tracks];
+    updatedTracks[trackIndex] = track.addPoint(candidate);
+    final updatedProjects = [..._projects];
+    updatedProjects[projectIndex] = project.withTracks(updatedTracks, now);
+    setState(() => _projects = updatedProjects);
+    _trackSaveTimer?.cancel();
+    _trackSaveTimer = Timer(
+      const Duration(seconds: 2),
+      () => unawaited(_saveProjects()),
+    );
+  }
+
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      await _stopRecording();
+      return;
+    }
+    if (_activeProject == null) {
+      await _openProjectPicker();
+      if (_activeProject == null) return;
+    }
+
+    final projectIndex = _projects.indexWhere(
+      (project) => project.id == _activeProjectId,
+    );
+    if (projectIndex < 0) return;
+    final now = DateTime.now().toUtc();
+    final track = GpsTrack(
+      id: 'track-${now.microsecondsSinceEpoch}',
+      startedAt: now,
+      points: [if (_position != null) _trackPoint(_position!)],
+    );
+    final project = _projects[projectIndex];
+    final updatedProjects = [..._projects];
+    updatedProjects[projectIndex] = project.withTracks(
+      [...project.tracks, track],
+      now,
+    );
+    setState(() {
+      _projects = updatedProjects;
+      _activeTrackId = track.id;
+      _isRecording = true;
+    });
+    await _saveProjects();
+  }
+
+  Future<void> _stopRecording() async {
+    final projectIndex = _projects.indexWhere(
+      (project) => project.id == _activeProjectId,
+    );
+    final now = DateTime.now().toUtc();
+    if (projectIndex >= 0 && _activeTrackId != null) {
+      final project = _projects[projectIndex];
+      final trackIndex = project.tracks.indexWhere(
+        (track) => track.id == _activeTrackId,
+      );
+      if (trackIndex >= 0) {
+        final updatedTracks = [...project.tracks];
+        updatedTracks[trackIndex] = updatedTracks[trackIndex].finish(now);
+        final updatedProjects = [..._projects];
+        updatedProjects[projectIndex] = project.withTracks(updatedTracks, now);
+        setState(() => _projects = updatedProjects);
+      }
+    }
+    _trackSaveTimer?.cancel();
+    setState(() {
+      _activeTrackId = null;
+      _isRecording = false;
+    });
+    await _saveProjects();
+  }
+
+  Future<void> _selectProject(String id) async {
+    if (_isRecording) await _stopRecording();
+    if (!mounted) return;
+    setState(() => _activeProjectId = id);
+    await _saveProjects();
+  }
+
+  Future<void> _createProject() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New field project'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Project name',
+            hintText: 'Cappadocia — September 2026',
+          ),
+          onSubmitted: (value) {
+            final trimmed = value.trim();
+            if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final trimmed = controller.text.trim();
+              if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || !mounted) return;
+    if (_isRecording) await _stopRecording();
+    final now = DateTime.now().toUtc();
+    final project = FieldProject(
+      id: 'project-${now.microsecondsSinceEpoch}',
+      name: name,
+      createdAt: now,
+      updatedAt: now,
+      tracks: const [],
+    );
+    setState(() {
+      _projects = [..._projects, project];
+      _activeProjectId = project.id;
+    });
+    await _saveProjects();
+  }
+
+  Future<void> _openProjectPicker() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Field projects',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      unawaited(_createProject());
+                    },
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                    label: const Text('New'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (_projects.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 30),
+                  child: Text('Create a project before recording a GPS track.'),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _projects.length,
+                    itemBuilder: (context, index) {
+                      final project = _projects[index];
+                      final selected = project.id == _activeProjectId;
+                      return ListTile(
+                        leading: Icon(
+                          selected ? Icons.folder : Icons.folder_outlined,
+                        ),
+                        title: Text(project.name),
+                        subtitle: Text(
+                          '${project.tracks.length} tracks · '
+                          '${project.pointCount} GPS points',
+                        ),
+                        trailing: selected ? const Icon(Icons.check) : null,
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          unawaited(_selectProject(project.id));
+                        },
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _setLocationError(String message) {
@@ -298,6 +580,7 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     final position = _position;
+    final activeProject = _activeProject;
     final point = position == null
         ? null
         : LatLng(position.latitude, position.longitude);
@@ -328,6 +611,23 @@ class _MapScreenState extends State<MapScreen> {
             ),
             children: [
               _buildBaseMap(),
+              if (activeProject != null)
+                PolylineLayer(
+                  polylines: [
+                    for (final track in activeProject.tracks)
+                      if (track.points.length > 1)
+                        Polyline(
+                          points: [
+                            for (final point in track.points)
+                              LatLng(point.latitude, point.longitude),
+                          ],
+                          color: const Color(0xFF9A3655),
+                          strokeWidth: 4,
+                          borderColor: Colors.white,
+                          borderStrokeWidth: 1.5,
+                        ),
+                  ],
+                ),
               if (point != null) ...[
                 CircleLayer(
                   circles: [
@@ -381,6 +681,19 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
           ),
+          Positioned(
+            left: 12,
+            bottom: 12,
+            child: SafeArea(
+              child: _ProjectTrackingControl(
+                project: activeProject,
+                isLoading: _isLoadingProjects,
+                isRecording: _isRecording,
+                onProjects: _openProjectPicker,
+                onToggleRecording: _toggleRecording,
+              ),
+            ),
+          ),
           if (_isLoadingMaps)
             const Positioned(
               left: 0,
@@ -413,6 +726,110 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ProjectTrackingControl extends StatelessWidget {
+  const _ProjectTrackingControl({
+    required this.project,
+    required this.isLoading,
+    required this.isRecording,
+    required this.onProjects,
+    required this.onToggleRecording,
+  });
+
+  final FieldProject? project;
+  final bool isLoading;
+  final bool isRecording;
+  final VoidCallback onProjects;
+  final VoidCallback onToggleRecording;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 4,
+      color: colors.surface.withValues(alpha: 0.96),
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 290),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: InkWell(
+                  onTap: onProjects,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          project == null
+                              ? Icons.create_new_folder_outlined
+                              : Icons.folder_open,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                isLoading
+                                    ? 'Loading projects…'
+                                    : project?.name ?? 'Choose a project',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                              if (!isLoading)
+                                Text(
+                                  project == null
+                                      ? 'Required for route logging'
+                                      : '${project!.tracks.length} tracks · '
+                                            '${project!.pointCount} points',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.expand_less, size: 18),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              FilledButton.icon(
+                onPressed: isLoading ? null : onToggleRecording,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 46),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  backgroundColor: isRecording
+                      ? colors.error
+                      : colors.primary,
+                ),
+                icon: Icon(
+                  isRecording ? Icons.stop_rounded : Icons.route_outlined,
+                  size: 20,
+                ),
+                label: Text(isRecording ? 'Stop' : 'Record'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
