@@ -472,7 +472,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
     final fileName = projectFileName(project, format);
     try {
-      final result = await FilePicker.platform.saveFile(
+      final result = await FilePicker.saveFile(
         dialogTitle: 'Export ${project.name}',
         fileName: fileName,
         type: FileType.custom,
@@ -868,7 +868,7 @@ class _ProjectTrackingControl extends StatelessWidget {
               ),
               const SizedBox(width: 2),
               IconButton(
-                onPressed: project != null && project.pointCount > 0
+                onPressed: (project?.pointCount ?? 0) > 0
                     ? onExport
                     : null,
                 tooltip: 'Export project',
