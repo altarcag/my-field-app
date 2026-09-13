@@ -1,10 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const FieldApp());
@@ -39,8 +45,12 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   static const LatLng _turkeyCenter = LatLng(39.0, 35.0);
+  static const String _offlinePathKey = 'offline_map_path';
+  static const String _offlineNameKey = 'offline_map_name';
+  static const String _offlineSelectedKey = 'offline_map_selected';
 
   final MapController _mapController = MapController();
+  final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
   StreamSubscription<Position>? _positionSubscription;
 
   Position? _position;
@@ -48,15 +58,23 @@ class _MapScreenState extends State<MapScreen> {
   bool _isLocating = true;
   bool _didCenterOnFirstFix = false;
 
+  MbTilesTileProvider? _offlineTileProvider;
+  String? _offlineMapPath;
+  String? _offlineMapName;
+  bool _useOfflineMap = false;
+  bool _isImportingMap = false;
+
   @override
   void initState() {
     super.initState();
     _startLocation();
+    _restoreOfflineMap();
   }
 
   @override
   void dispose() {
     _positionSubscription?.cancel();
+    _offlineTileProvider?.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -162,6 +180,261 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  Future<void> _restoreOfflineMap() async {
+    final savedPath = await _preferences.getString(_offlinePathKey);
+    if (savedPath == null || !await File(savedPath).exists()) return;
+
+    try {
+      final provider = MbTilesTileProvider.fromPath(path: savedPath);
+      final name =
+          await _preferences.getString(_offlineNameKey) ??
+          path.basename(savedPath);
+      final selected =
+          await _preferences.getBool(_offlineSelectedKey) ?? false;
+
+      if (!mounted) {
+        provider.dispose();
+        return;
+      }
+
+      setState(() {
+        _offlineTileProvider = provider;
+        _offlineMapPath = savedPath;
+        _offlineMapName = name;
+        _useOfflineMap = selected;
+      });
+    } catch (_) {
+      await _preferences.remove(_offlinePathKey);
+      await _preferences.remove(_offlineNameKey);
+      await _preferences.remove(_offlineSelectedKey);
+    }
+  }
+
+  Future<void> _importMbTiles() async {
+    final selected = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const ['mbtiles'],
+    );
+    if (selected == null) return;
+
+    if (mounted) {
+      setState(() => _isImportingMap = true);
+    }
+
+    File? temporaryFile;
+    try {
+      final documents = await getApplicationDocumentsDirectory();
+      final mapsDirectory = Directory(
+        path.join(documents.path, 'offline_maps'),
+      );
+      await mapsDirectory.create(recursive: true);
+
+      final safeName = selected.name.replaceAll(
+        RegExp(r'[^A-Za-z0-9._-]'),
+        '_',
+      );
+      final destination = File(path.join(mapsDirectory.path, safeName));
+      temporaryFile = File('${destination.path}.importing');
+
+      if (await temporaryFile.exists()) {
+        await temporaryFile.delete();
+      }
+
+      final output = temporaryFile.openWrite();
+      await output.addStream(selected.readAsByteStream());
+      await output.close();
+
+      final validator = MbTilesTileProvider.fromPath(
+        path: temporaryFile.path,
+      );
+      validator.mbtiles.getMetadata();
+      validator.dispose();
+
+      _offlineTileProvider?.dispose();
+      if (await destination.exists()) {
+        await destination.delete();
+      }
+      await temporaryFile.rename(destination.path);
+
+      final provider = MbTilesTileProvider.fromPath(
+        path: destination.path,
+      );
+
+      await _preferences.setString(_offlinePathKey, destination.path);
+      await _preferences.setString(_offlineNameKey, selected.name);
+      await _preferences.setBool(_offlineSelectedKey, true);
+
+      if (!mounted) {
+        provider.dispose();
+        return;
+      }
+
+      setState(() {
+        _offlineTileProvider = provider;
+        _offlineMapPath = destination.path;
+        _offlineMapName = selected.name;
+        _useOfflineMap = true;
+      });
+      _showMessage('Offline map imported: ${selected.name}');
+    } catch (error) {
+      if (temporaryFile != null && await temporaryFile.exists()) {
+        await temporaryFile.delete();
+      }
+      _showMessage('Could not import that MBTiles file');
+    } finally {
+      if (mounted) {
+        setState(() => _isImportingMap = false);
+      }
+    }
+  }
+
+  Future<void> _selectOnlineMap() async {
+    await _preferences.setBool(_offlineSelectedKey, false);
+    if (mounted) {
+      setState(() => _useOfflineMap = false);
+    }
+  }
+
+  Future<void> _selectOfflineMap() async {
+    if (_offlineTileProvider == null) {
+      await _importMbTiles();
+      return;
+    }
+
+    await _preferences.setBool(_offlineSelectedKey, true);
+    if (mounted) {
+      setState(() => _useOfflineMap = true);
+    }
+  }
+
+  Future<void> _removeOfflineMap() async {
+    final mapPath = _offlineMapPath;
+    if (mapPath == null) return;
+
+    _offlineTileProvider?.dispose();
+    if (mounted) {
+      setState(() {
+        _offlineTileProvider = null;
+        _offlineMapPath = null;
+        _offlineMapName = null;
+        _useOfflineMap = false;
+      });
+    }
+
+    await _preferences.remove(_offlinePathKey);
+    await _preferences.remove(_offlineNameKey);
+    await _preferences.remove(_offlineSelectedKey);
+
+    final mapFile = File(mapPath);
+    if (await mapFile.exists()) {
+      await mapFile.delete();
+    }
+    _showMessage('Offline map removed');
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showMapLayers() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ListTile(
+                  title: Text(
+                    'Map layers',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    'Previously viewed online tiles are cached automatically.',
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.public),
+                  title: const Text('OpenStreetMap'),
+                  subtitle: const Text('Online map with browse caching'),
+                  trailing: !_useOfflineMap
+                      ? const Icon(Icons.check_circle)
+                      : null,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _selectOnlineMap();
+                  },
+                ),
+                if (_offlineTileProvider != null)
+                  ListTile(
+                    leading: const Icon(Icons.offline_pin),
+                    title: Text(_offlineMapName ?? 'Imported offline map'),
+                    subtitle: const Text('MBTiles · fully offline'),
+                    trailing: _useOfflineMap
+                        ? const Icon(Icons.check_circle)
+                        : null,
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _selectOfflineMap();
+                    },
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.file_open),
+                  title: const Text('Import MBTiles'),
+                  subtitle: const Text('Copy an offline map onto this phone'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _importMbTiles();
+                  },
+                ),
+                if (_offlineTileProvider != null)
+                  ListTile(
+                    leading: Icon(
+                      Icons.delete_outline,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    title: Text(
+                      'Remove imported map',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _removeOfflineMap();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  TileLayer _buildBaseMap() {
+    if (_useOfflineMap && _offlineTileProvider != null) {
+      return TileLayer(
+        key: ValueKey(_offlineMapPath),
+        tileProvider: _offlineTileProvider!,
+        maxNativeZoom: 22,
+      );
+    }
+
+    return TileLayer(
+      key: const ValueKey('openstreetmap'),
+      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      userAgentPackageName: 'com.altarcag.my_field_atlas_android',
+      maxNativeZoom: 19,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final position = _position;
@@ -178,15 +451,10 @@ class _MapScreenState extends State<MapScreen> {
               initialCenter: _turkeyCenter,
               initialZoom: 5.5,
               minZoom: 2,
-              maxZoom: 19,
+              maxZoom: 22,
             ),
             children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName:
-                    'com.altarcag.my_field_atlas_android',
-                maxNativeZoom: 19,
-              ),
+              _buildBaseMap(),
               if (point != null) ...[
                 CircleLayer(
                   circles: [
@@ -213,10 +481,14 @@ class _MapScreenState extends State<MapScreen> {
               ],
             ],
           ),
-          const Positioned(
+          Positioned(
             right: 8,
             bottom: 6,
-            child: _Attribution(),
+            child: _Attribution(
+              text: _useOfflineMap
+                  ? 'Offline · ${_offlineMapName ?? 'MBTiles'}'
+                  : '© OpenStreetMap contributors',
+            ),
           ),
           SafeArea(
             child: Padding(
@@ -230,12 +502,48 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
           ),
+          if (_isImportingMap)
+            const ColoredBox(
+              color: Color(0x33000000),
+              child: Center(
+                child: Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(width: 16),
+                        Text('Importing offline map…'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _centerOnPosition,
-        tooltip: 'Centre on my location',
-        child: Icon(position == null ? Icons.gps_not_fixed : Icons.my_location),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'map-layers',
+            onPressed: _showMapLayers,
+            tooltip: 'Map layers',
+            child: Icon(
+              _useOfflineMap ? Icons.offline_pin : Icons.layers_outlined,
+            ),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: 'my-location',
+            onPressed: _centerOnPosition,
+            tooltip: 'Centre on my location',
+            child: Icon(
+              position == null ? Icons.gps_not_fixed : Icons.my_location,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -372,7 +680,9 @@ class _PositionReadout extends StatelessWidget {
 }
 
 class _Attribution extends StatelessWidget {
-  const _Attribution();
+  const _Attribution({required this.text});
+
+  final String text;
 
   @override
   Widget build(BuildContext context) {
@@ -381,12 +691,9 @@ class _Attribution extends StatelessWidget {
         color: Colors.white.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-        child: Text(
-          '© OpenStreetMap contributors',
-          style: TextStyle(fontSize: 10),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        child: Text(text, style: const TextStyle(fontSize: 10)),
       ),
     );
   }
