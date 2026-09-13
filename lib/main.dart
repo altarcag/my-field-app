@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -53,6 +54,7 @@ class _MapScreenState extends State<MapScreen> {
   static const LatLng _turkeyCenter = LatLng(39.0, 35.0);
 
   final MapController _mapController = MapController();
+  final ValueNotifier<double> _mapRotation = ValueNotifier(0);
   final OfflineMapStore _offlineMaps = OfflineMapStore();
   StreamSubscription<Position>? _positionSubscription;
 
@@ -81,6 +83,7 @@ class _MapScreenState extends State<MapScreen> {
     _positionSubscription?.cancel();
     _offlineTileProvider?.dispose();
     _onlineTileProvider.dispose();
+    _mapRotation.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -303,11 +306,20 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           FlutterMap(
             mapController: _mapController,
-            options: const MapOptions(
+            options: MapOptions(
               initialCenter: _turkeyCenter,
               initialZoom: 5.5,
               minZoom: 2,
               maxZoom: 22,
+              interactionOptions: const InteractionOptions(
+                enableMultiFingerGestureRace: true,
+                rotationThreshold: 30,
+              ),
+              onPositionChanged: (camera, _) {
+                if ((_mapRotation.value - camera.rotation).abs() > 0.05) {
+                  _mapRotation.value = camera.rotation;
+                }
+              },
             ),
             children: [
               _buildBaseMap(),
@@ -354,6 +366,16 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
           ),
+          Positioned(
+            top: 12,
+            right: 12,
+            child: SafeArea(
+              child: _NorthControl(
+                rotation: _mapRotation,
+                onPressed: () => _mapController.rotate(0),
+              ),
+            ),
+          ),
           if (_isLoadingMaps)
             const Positioned(
               left: 0,
@@ -377,13 +399,6 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          FloatingActionButton.small(
-            heroTag: 'north',
-            onPressed: () => _mapController.rotate(0),
-            tooltip: 'Point north',
-            child: const Icon(Icons.north),
-          ),
-          const SizedBox(height: 12),
           FloatingActionButton(
             heroTag: 'my-location',
             onPressed: _centerOnPosition,
@@ -396,6 +411,108 @@ class _MapScreenState extends State<MapScreen> {
       ),
     );
   }
+}
+
+class _NorthControl extends StatelessWidget {
+  const _NorthControl({
+    required this.rotation,
+    required this.onPressed,
+  });
+
+  final ValueListenable<double> rotation;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return ValueListenableBuilder<double>(
+      valueListenable: rotation,
+      builder: (context, degrees, _) {
+        final isNorthUp = degrees.abs() < 0.1;
+        return Tooltip(
+          message: isNorthUp ? 'Map is pointing north' : 'Reset north',
+          child: Material(
+            color: colors.surface.withValues(alpha: 0.96),
+            elevation: 3,
+            shadowColor: Colors.black26,
+            shape: CircleBorder(
+              side: BorderSide(color: colors.outlineVariant),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onPressed,
+              customBorder: const CircleBorder(),
+              child: Semantics(
+                button: true,
+                label: isNorthUp ? 'Map is pointing north' : 'Reset map north',
+                child: SizedBox.square(
+                  dimension: 52,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Positioned(
+                        top: 5,
+                        child: Text(
+                          'N',
+                          style: TextStyle(
+                            color: colors.primary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            height: 1,
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 7),
+                        child: Transform.rotate(
+                          angle: -degrees * math.pi / 180,
+                          child: const CustomPaint(
+                            size: Size.square(25),
+                            painter: _CompassNeedlePainter(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CompassNeedlePainter extends CustomPainter {
+  const _CompassNeedlePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final north = Path()
+      ..moveTo(center.dx, 1)
+      ..lineTo(center.dx + 4.5, center.dy)
+      ..lineTo(center.dx - 4.5, center.dy)
+      ..close();
+    final south = Path()
+      ..moveTo(center.dx, size.height - 1)
+      ..lineTo(center.dx + 4.5, center.dy)
+      ..lineTo(center.dx - 4.5, center.dy)
+      ..close();
+
+    canvas.drawPath(north, Paint()..color = const Color(0xFF9A3655));
+    canvas.drawPath(south, Paint()..color = const Color(0xFF66717C));
+    canvas.drawCircle(center, 2.1, Paint()..color = Colors.white);
+    canvas.drawCircle(
+      center,
+      1.15,
+      Paint()..color = const Color(0xFF35424D),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CompassNeedlePainter oldDelegate) => false;
 }
 
 class _LocationMarker extends StatelessWidget {
