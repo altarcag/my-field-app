@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cache/flutter_map_cache.dart';
@@ -13,6 +14,7 @@ import 'field_projects.dart';
 import 'map_library_page.dart';
 import 'offline_maps.dart';
 import 'online_maps.dart';
+import 'project_export.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -431,6 +433,58 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (createNew == true && mounted) await _createProject();
   }
 
+  Future<void> _exportActiveProject() async {
+    final project = _activeProject;
+    if (project == null || project.pointCount == 0) {
+      _showMessage('Record at least one GPS point before exporting.');
+      return;
+    }
+
+    final format = await showDialog<ProjectExportFormat>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Export field project'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () =>
+                Navigator.pop(dialogContext, ProjectExportFormat.kmz),
+            child: const ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.folder_zip_outlined),
+              title: Text('KMZ'),
+              subtitle: Text('Compressed and ready for My Field Atlas'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () =>
+                Navigator.pop(dialogContext, ProjectExportFormat.kml),
+            child: const ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.code_outlined),
+              title: Text('KML'),
+              subtitle: Text('Uncompressed Google Earth document'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (format == null) return;
+
+    final fileName = projectFileName(project, format);
+    try {
+      final result = await FilePicker.platform.saveFile(
+        dialogTitle: 'Export ${project.name}',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: [format.name],
+        bytes: projectExportBytes(project, format),
+      );
+      if (result != null) _showMessage('Exported $fileName');
+    } catch (error) {
+      _showMessage('Could not export project: $error');
+    }
+  }
+
   void _setLocationError(String message) {
     if (!mounted) return;
     setState(() {
@@ -688,6 +742,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 isLoading: _isLoadingProjects,
                 isRecording: _isRecording,
                 onProjects: _openProjectPicker,
+                onExport: _exportActiveProject,
                 onToggleRecording: _toggleRecording,
               ),
             ),
@@ -735,6 +790,7 @@ class _ProjectTrackingControl extends StatelessWidget {
     required this.isLoading,
     required this.isRecording,
     required this.onProjects,
+    required this.onExport,
     required this.onToggleRecording,
   });
 
@@ -742,6 +798,7 @@ class _ProjectTrackingControl extends StatelessWidget {
   final bool isLoading;
   final bool isRecording;
   final VoidCallback onProjects;
+  final VoidCallback onExport;
   final VoidCallback onToggleRecording;
 
   @override
@@ -809,7 +866,15 @@ class _ProjectTrackingControl extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 2),
+              IconButton(
+                onPressed: project != null && project.pointCount > 0
+                    ? onExport
+                    : null,
+                tooltip: 'Export project',
+                icon: const Icon(Icons.file_download_outlined),
+              ),
+              const SizedBox(width: 2),
               FilledButton.icon(
                 onPressed: isLoading ? null : onToggleRecording,
                 style: FilledButton.styleFrom(
