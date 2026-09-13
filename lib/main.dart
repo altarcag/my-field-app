@@ -2,21 +2,26 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_cache/flutter_map_cache.dart';
 import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'map_library_page.dart';
 import 'offline_maps.dart';
+import 'online_maps.dart';
 
-enum OnlineBasemap { street, satellite, topographic }
-
-void main() {
-  runApp(const FieldApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final onlineMapCache = OnlineMapCache();
+  await onlineMapCache.initialize();
+  runApp(FieldApp(onlineMapCache: onlineMapCache));
 }
 
 class FieldApp extends StatelessWidget {
-  const FieldApp({super.key});
+  const FieldApp({super.key, required this.onlineMapCache});
+
+  final OnlineMapCache onlineMapCache;
 
   @override
   Widget build(BuildContext context) {
@@ -30,13 +35,15 @@ class FieldApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const MapScreen(),
+      home: MapScreen(onlineMapCache: onlineMapCache),
     );
   }
 }
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({super.key, required this.onlineMapCache});
+
+  final OnlineMapCache onlineMapCache;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -58,11 +65,13 @@ class _MapScreenState extends State<MapScreen> {
   InstalledMap? _activeOfflineMap;
   MbTilesTileProvider? _offlineTileProvider;
   OnlineBasemap _onlineBasemap = OnlineBasemap.street;
+  late CachedTileProvider _onlineTileProvider;
   bool _isLoadingMaps = true;
 
   @override
   void initState() {
     super.initState();
+    _onlineTileProvider = widget.onlineMapCache.providerFor(_onlineBasemap);
     _startLocation();
     _restoreMaps();
   }
@@ -71,6 +80,7 @@ class _MapScreenState extends State<MapScreen> {
   void dispose() {
     _positionSubscription?.cancel();
     _offlineTileProvider?.dispose();
+    _onlineTileProvider.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -169,16 +179,21 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _restoreMaps() async {
     final maps = await _offlineMaps.load();
     final activeId = await _offlineMaps.getActiveId();
+    final onlineBasemap = await widget.onlineMapCache.getSelected();
     InstalledMap? active;
     for (final map in maps) {
       if (map.id == activeId) active = map;
     }
 
     if (!mounted) return;
+    final oldOnlineProvider = _onlineTileProvider;
     setState(() {
       _installedMaps = maps;
+      _onlineBasemap = onlineBasemap;
+      _onlineTileProvider = widget.onlineMapCache.providerFor(onlineBasemap);
       _isLoadingMaps = false;
     });
+    oldOnlineProvider.dispose();
     if (active != null) await _activateMap(active, persist: false);
   }
 
@@ -214,7 +229,14 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _selectOnlineBasemap(OnlineBasemap basemap) async {
     await _activateMap(null);
-    if (mounted) setState(() => _onlineBasemap = basemap);
+    if (!mounted) return;
+    final oldProvider = _onlineTileProvider;
+    setState(() {
+      _onlineBasemap = basemap;
+      _onlineTileProvider = widget.onlineMapCache.providerFor(basemap);
+    });
+    oldProvider.dispose();
+    await widget.onlineMapCache.setSelected(basemap);
   }
 
   void _mapsChanged(List<InstalledMap> maps) {
@@ -228,12 +250,11 @@ class _MapScreenState extends State<MapScreen> {
           store: _offlineMaps,
           installedMaps: _installedMaps,
           activeMapId: _activeOfflineMap?.id,
-          onlineStreetMapSelected:
-              _activeOfflineMap == null && _onlineBasemap == OnlineBasemap.street,
+          onlineMapCache: widget.onlineMapCache,
+          onlineBasemap: _onlineBasemap,
           onMapsChanged: _mapsChanged,
           onActivate: _activateMap,
-          onSelectOnlineStreetMap: () =>
-              _selectOnlineBasemap(OnlineBasemap.street),
+          onSelectOnlineBasemap: _selectOnlineBasemap,
         ),
       ),
     );
@@ -255,41 +276,19 @@ class _MapScreenState extends State<MapScreen> {
         maxNativeZoom: 22,
       );
     }
-    if (_onlineBasemap == OnlineBasemap.satellite) {
-      return TileLayer(
-        key: const ValueKey('esri-world-imagery'),
-        urlTemplate:
-            'https://server.arcgisonline.com/ArcGIS/rest/services/'
-            'World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        userAgentPackageName: 'com.altarcag.my_field_atlas_android',
-        maxNativeZoom: 19,
-      );
-    }
-    if (_onlineBasemap == OnlineBasemap.topographic) {
-      return TileLayer(
-        key: const ValueKey('opentopomap'),
-        urlTemplate: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
-        userAgentPackageName: 'com.altarcag.my_field_atlas_android',
-        maxNativeZoom: 17,
-      );
-    }
     return TileLayer(
-      key: const ValueKey('openstreetmap'),
-      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      key: ValueKey(_onlineBasemap.id),
+      urlTemplate: _onlineBasemap.urlTemplate,
+      tileProvider: _onlineTileProvider,
       userAgentPackageName: 'com.altarcag.my_field_atlas_android',
-      maxNativeZoom: 19,
+      maxNativeZoom: _onlineBasemap.maxNativeZoom,
     );
   }
 
   String get _attributionText {
     final offlineAttribution = _activeOfflineMap?.attribution;
     if (offlineAttribution != null) return offlineAttribution;
-    return switch (_onlineBasemap) {
-      OnlineBasemap.street => '© OpenStreetMap contributors',
-      OnlineBasemap.satellite => 'Imagery © Esri and contributors',
-      OnlineBasemap.topographic =>
-        '© OpenTopoMap · © OpenStreetMap contributors',
-    };
+    return _onlineBasemap.attribution;
   }
 
   @override
@@ -355,20 +354,6 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
           ),
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 84, right: 12),
-                child: _BasemapSwitcher(
-                  selected: _activeOfflineMap == null
-                      ? _onlineBasemap
-                      : null,
-                  onSelected: _selectOnlineBasemap,
-                ),
-              ),
-            ),
-          ),
           if (_isLoadingMaps)
             const Positioned(
               left: 0,
@@ -384,12 +369,19 @@ class _MapScreenState extends State<MapScreen> {
           FloatingActionButton.small(
             heroTag: 'map-library',
             onPressed: _openMapLibrary,
-            tooltip: 'Offline maps',
+            tooltip: 'Maps and layers',
             child: Icon(
               _activeOfflineMap == null
                   ? Icons.layers_outlined
                   : Icons.offline_pin,
             ),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.small(
+            heroTag: 'north',
+            onPressed: () => _mapController.rotate(0),
+            tooltip: 'Point north',
+            child: const Icon(Icons.north),
           ),
           const SizedBox(height: 12),
           FloatingActionButton(
@@ -401,84 +393,6 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _BasemapSwitcher extends StatelessWidget {
-  const _BasemapSwitcher({
-    required this.selected,
-    required this.onSelected,
-  });
-
-  final OnlineBasemap? selected;
-  final ValueChanged<OnlineBasemap> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      elevation: 3,
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      color: Colors.white.withValues(alpha: 0.94),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _BasemapButton(
-            icon: Icons.map_outlined,
-            label: 'Map',
-            selected: selected == OnlineBasemap.street,
-            onPressed: () => onSelected(OnlineBasemap.street),
-          ),
-          _BasemapButton(
-            icon: Icons.satellite_alt_outlined,
-            label: 'Satellite',
-            selected: selected == OnlineBasemap.satellite,
-            onPressed: () => onSelected(OnlineBasemap.satellite),
-          ),
-          _BasemapButton(
-            icon: Icons.terrain_outlined,
-            label: 'Topo',
-            selected: selected == OnlineBasemap.topographic,
-            onPressed: () => onSelected(OnlineBasemap.topographic),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BasemapButton extends StatelessWidget {
-  const _BasemapButton({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onPressed,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-        color: selected ? colorScheme.secondaryContainer : Colors.transparent,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 18),
-            const SizedBox(width: 5),
-            Text(label, style: Theme.of(context).textTheme.labelMedium),
-          ],
-        ),
       ),
     );
   }

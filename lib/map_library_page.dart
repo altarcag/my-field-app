@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'offline_maps.dart';
+import 'online_maps.dart';
 
 class MapLibraryPage extends StatefulWidget {
   const MapLibraryPage({
@@ -8,19 +9,21 @@ class MapLibraryPage extends StatefulWidget {
     required this.store,
     required this.installedMaps,
     required this.activeMapId,
-    required this.onlineStreetMapSelected,
+    required this.onlineMapCache,
+    required this.onlineBasemap,
     required this.onMapsChanged,
     required this.onActivate,
-    required this.onSelectOnlineStreetMap,
+    required this.onSelectOnlineBasemap,
   });
 
   final OfflineMapStore store;
   final List<InstalledMap> installedMaps;
   final String? activeMapId;
-  final bool onlineStreetMapSelected;
+  final OnlineMapCache onlineMapCache;
+  final OnlineBasemap onlineBasemap;
   final ValueChanged<List<InstalledMap>> onMapsChanged;
   final Future<void> Function(InstalledMap?) onActivate;
-  final Future<void> Function() onSelectOnlineStreetMap;
+  final Future<void> Function(OnlineBasemap) onSelectOnlineBasemap;
 
   @override
   State<MapLibraryPage> createState() => _MapLibraryPageState();
@@ -29,8 +32,9 @@ class MapLibraryPage extends StatefulWidget {
 class _MapLibraryPageState extends State<MapLibraryPage> {
   late List<InstalledMap> _installed;
   late String? _activeId;
-  late bool _onlineStreetMapSelected;
+  late OnlineBasemap _onlineBasemap;
   late Future<List<CatalogMap>> _catalog;
+  late Future<Map<OnlineBasemap, int>> _cacheSizes;
   String? _downloadingId;
   double? _progress;
   bool _cancelRequested = false;
@@ -40,8 +44,9 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
     super.initState();
     _installed = [...widget.installedMaps];
     _activeId = widget.activeMapId;
-    _onlineStreetMapSelected = widget.onlineStreetMapSelected;
+    _onlineBasemap = widget.onlineBasemap;
     _catalog = widget.store.fetchCatalog();
+    _cacheSizes = widget.onlineMapCache.sizes();
   }
 
   @override
@@ -50,8 +55,11 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
     super.dispose();
   }
 
-  void _refreshCatalog() {
-    setState(() => _catalog = widget.store.fetchCatalog());
+  void _refresh() {
+    setState(() {
+      _catalog = widget.store.fetchCatalog();
+      _cacheSizes = widget.onlineMapCache.sizes();
+    });
   }
 
   Future<void> _activate(InstalledMap map) async {
@@ -59,19 +67,45 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
     if (mounted) {
       setState(() {
         _activeId = map.id;
-        _onlineStreetMapSelected = false;
       });
     }
   }
 
-  Future<void> _selectOnlineStreetMap() async {
-    await widget.onSelectOnlineStreetMap();
+  Future<void> _selectOnlineBasemap(OnlineBasemap basemap) async {
+    await widget.onSelectOnlineBasemap(basemap);
     if (mounted) {
       setState(() {
         _activeId = null;
-        _onlineStreetMapSelected = true;
+        _onlineBasemap = basemap;
       });
     }
+  }
+
+  Future<void> _clearCache(OnlineBasemap basemap) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Clear ${basemap.label} cache?'),
+        content: const Text(
+          'Previously viewed tiles for this layer will be removed from this phone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.onlineMapCache.clear(basemap);
+    if (!mounted) return;
+    setState(() => _cacheSizes = widget.onlineMapCache.sizes());
+    _message('${basemap.label} cache cleared');
   }
 
   Future<void> _import() async {
@@ -152,7 +186,7 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
     );
     if (confirmed != true) return;
 
-    if (_activeId == map.id) await _selectOnlineStreetMap();
+    if (_activeId == map.id) await _selectOnlineBasemap(_onlineBasemap);
     await widget.store.remove(map, _installed);
     if (!mounted) return;
     setState(() => _installed.removeWhere((item) => item.id == map.id));
@@ -170,11 +204,11 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Offline maps'),
+        title: const Text('Maps & layers'),
         actions: [
           IconButton(
-            onPressed: _refreshCatalog,
-            tooltip: 'Refresh library',
+            onPressed: _refresh,
+            tooltip: 'Refresh sizes and library',
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -185,14 +219,76 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
           Text('MAP ON SCREEN', style: Theme.of(context).textTheme.labelSmall),
           const SizedBox(height: 8),
           Card(
-            child: ListTile(
-              onTap: _selectOnlineStreetMap,
-              leading: const Icon(Icons.public),
-              title: const Text('OpenStreetMap'),
-              subtitle: const Text('Online · previously viewed areas are cached'),
-              trailing: _onlineStreetMapSelected
-                  ? const Icon(Icons.check_circle, color: Color(0xFF26734D))
-                  : null,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<OnlineBasemap>(
+                      segments: const [
+                        ButtonSegment(
+                          value: OnlineBasemap.street,
+                          icon: Icon(Icons.map_outlined),
+                          label: Text('Map'),
+                        ),
+                        ButtonSegment(
+                          value: OnlineBasemap.satellite,
+                          icon: Icon(Icons.satellite_alt_outlined),
+                          label: Text('Satellite'),
+                        ),
+                        ButtonSegment(
+                          value: OnlineBasemap.topographic,
+                          icon: Icon(Icons.terrain_outlined),
+                          label: Text('Topo'),
+                        ),
+                      ],
+                      selected: _activeId == null ? {_onlineBasemap} : {},
+                      emptySelectionAllowed: true,
+                      showSelectedIcon: false,
+                      onSelectionChanged: (selection) {
+                        if (selection.isNotEmpty) {
+                          _selectOnlineBasemap(selection.first);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Tiles are saved automatically as you browse. Cached areas remain visible without internet.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const Divider(height: 24),
+                  FutureBuilder<Map<OnlineBasemap, int>>(
+                    future: _cacheSizes,
+                    builder: (context, snapshot) {
+                      final sizes = snapshot.data;
+                      if (sizes == null) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      return Column(
+                        children: [
+                          for (final basemap in OnlineBasemap.values)
+                            _CacheSizeRow(
+                              basemap: basemap,
+                              bytes: sizes[basemap] ?? 0,
+                              onClear: () => _clearCache(basemap),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: _refresh,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Refresh sizes'),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -266,7 +362,7 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
                   icon: Icons.cloud_off,
                   text: 'The map library could not be reached.',
                   action: TextButton(
-                    onPressed: _refreshCatalog,
+                    onPressed: _refresh,
                     child: const Text('Try again'),
                   ),
                 );
@@ -343,6 +439,50 @@ class _MapLibraryPageState extends State<MapLibraryPage> {
       ),
     );
   }
+}
+
+class _CacheSizeRow extends StatelessWidget {
+  const _CacheSizeRow({
+    required this.basemap,
+    required this.bytes,
+    required this.onClear,
+  });
+
+  final OnlineBasemap basemap;
+  final int bytes;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (basemap) {
+      OnlineBasemap.street => Icons.map_outlined,
+      OnlineBasemap.satellite => Icons.satellite_alt_outlined,
+      OnlineBasemap.topographic => Icons.terrain_outlined,
+    };
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, size: 21),
+      title: Text('${basemap.label} cache'),
+      subtitle: Text(_formatCacheSize(bytes)),
+      trailing: IconButton(
+        onPressed: bytes > 0 ? onClear : null,
+        tooltip: 'Clear ${basemap.label} cache',
+        icon: const Icon(Icons.delete_sweep_outlined),
+      ),
+    );
+  }
+}
+
+String _formatCacheSize(int bytes) {
+  if (bytes <= 0) return '0 MB';
+  const kilobyte = 1024;
+  const megabyte = 1024 * kilobyte;
+  const gigabyte = 1024 * megabyte;
+  if (bytes >= gigabyte) return '${(bytes / gigabyte).toStringAsFixed(1)} GB';
+  if (bytes >= megabyte) return '${(bytes / megabyte).toStringAsFixed(1)} MB';
+  if (bytes >= kilobyte) return '${(bytes / kilobyte).round()} KB';
+  return '$bytes B';
 }
 
 class _EmptyCard extends StatelessWidget {

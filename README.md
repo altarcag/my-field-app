@@ -6,11 +6,13 @@ Flutter.
 ## Current features
 
 - Live high-accuracy GPS position, altitude, and accuracy radius
-- On-map switch between OpenStreetMap, Esri World Imagery, and OpenTopoMap
+- OpenStreetMap, Esri World Imagery, and OpenTopoMap layer selection
+- Persistent browse cache with separate storage totals for each online layer
 - Multiple offline raster MBTiles maps
 - Import MBTiles through Android's file picker
 - Downloadable map catalogue backed by Cloudflare R2
 - Persistent map selection and on-device map deletion
+- North reset control for map rotation
 
 ## Map catalogue
 
