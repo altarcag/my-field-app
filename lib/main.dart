@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -419,7 +420,7 @@ class _NorthControl extends StatelessWidget {
     required this.onPressed,
   });
 
-  final ValueListenable<double> rotation;
+  final ValueNotifier<double> rotation;
   final VoidCallback onPressed;
 
   @override
@@ -490,12 +491,12 @@ class _CompassNeedlePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final north = Path()
+    final north = ui.Path()
       ..moveTo(center.dx, 1)
       ..lineTo(center.dx + 4.5, center.dy)
       ..lineTo(center.dx - 4.5, center.dy)
       ..close();
-    final south = Path()
+    final south = ui.Path()
       ..moveTo(center.dx, size.height - 1)
       ..lineTo(center.dx + 4.5, center.dy)
       ..lineTo(center.dx - 4.5, center.dy)
