@@ -71,7 +71,7 @@ class OnlineMapCache {
   CachedTileProvider providerFor(OnlineBasemap basemap) {
     return CachedTileProvider(
       store: _stores[basemap]!,
-      headers: const {'User-Agent': _userAgent},
+      headers: {'User-Agent': _userAgent},
     );
   }
 
