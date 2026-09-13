@@ -152,7 +152,7 @@ class _MapScreenState extends State<MapScreen> {
     final currentZoom = _mapController.camera.zoom;
     _mapController.move(
       LatLng(position.latitude, position.longitude),
-      currentZoom < 16 ? 16 : currentZoom,
+      currentZoom < 16 ? 16.0 : currentZoom,
     );
   }
 
