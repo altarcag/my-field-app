@@ -1092,14 +1092,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
               onPositionChanged: (camera, hasGesture) {
                 if (hasGesture) {
                   _cameraAnimation.stop();
-                  if (_followLocation && _position != null) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (!mounted || !_followLocation || _position == null) return;
-                      _mapController.move(
-                        LatLng(_position!.latitude, _position!.longitude),
-                        _mapController.camera.zoom,
-                      );
-                    });
+                  if (_followLocation) {
+                    setState(() => _followLocation = false);
                   }
                 }
                 if (hasGesture && _centerMenuOpen) {
@@ -1283,22 +1277,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
             ),
           ),
           const SizedBox(height: 12),
-          FloatingActionButton.small(
-            heroTag: 'follow-location',
-            tooltip: _followLocation ? 'Stop following GPS' : 'Lock center to GPS',
-            backgroundColor: _followLocation
-                ? Theme.of(context).colorScheme.primaryContainer : null,
-            onPressed: () {
-              setState(() => _followLocation = !_followLocation);
-              if (_followLocation) _centerOnPosition();
-            },
-            child: Icon(_followLocation ? Icons.lock : Icons.lock_open),
-          ),
-          const SizedBox(height: 8),
           FloatingActionButton(
             heroTag: 'my-location',
-            onPressed: _centerOnPosition,
-            tooltip: 'Centre on my location',
+            onPressed: () {
+              setState(() => _followLocation = true);
+              _centerOnPosition();
+            },
+            tooltip: _followLocation ? 'Following GPS' : 'Center and follow GPS',
+            backgroundColor: _followLocation
+                ? Theme.of(context).colorScheme.primaryContainer : null,
             child: Icon(
               position == null ? Icons.gps_not_fixed : Icons.my_location,
             ),
