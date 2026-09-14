@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cache/flutter_map_cache.dart';
 import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
@@ -61,6 +62,9 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const LatLng _turkeyCenter = LatLng(39.0, 35.0);
+  static const MethodChannel _androidPermissions = MethodChannel(
+    'com.altarcag.my_field_atlas_android/permissions',
+  );
 
   final MapController _mapController = MapController();
   final ValueNotifier<double> _mapRotation = ValueNotifier(0);
@@ -122,7 +126,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _startLocation() async {
+  Future<void> _startLocation({bool backgroundTracking = false}) async {
     await _positionSubscription?.cancel();
     if (mounted) {
       setState(() {
@@ -157,15 +161,45 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       });
     }
 
-    const settings = LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 0,
-    );
+    final LocationSettings settings;
+    if (Platform.isAndroid) {
+      settings = AndroidSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+        intervalDuration: const Duration(seconds: 2),
+        foregroundNotificationConfig: backgroundTracking
+            ? ForegroundNotificationConfig(
+                notificationTitle: 'GPS route recording active',
+                notificationText:
+                    'Recording ${_activeProject?.name ?? 'your field route'}',
+                enableWakeLock: true,
+                setOngoing: true,
+              )
+            : null,
+      );
+    } else {
+      settings = const LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+      );
+    }
     _positionSubscription =
         Geolocator.getPositionStream(locationSettings: settings).listen(
           _handlePosition,
           onError: (Object error) => _setLocationError('GPS error: $error'),
         );
+  }
+
+  Future<bool> _requestNotificationPermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _androidPermissions.invokeMethod<bool>(
+            'requestNotificationPermission',
+          ) ??
+          true;
+    } on PlatformException {
+      return false;
+    }
   }
 
   void _handlePosition(Position position) {
@@ -267,6 +301,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       if (_activeProject == null) return;
     }
 
+    var notificationGranted = true;
+    if (Platform.isAndroid) {
+      notificationGranted = await _requestNotificationPermission();
+      if (!mounted) return;
+    }
+
     final projectIndex = _projects.indexWhere(
       (project) => project.id == _activeProjectId,
     );
@@ -289,6 +329,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _isRecording = true;
     });
     await _saveProjects();
+    await _startLocation(backgroundTracking: true);
+    if (!notificationGranted) {
+      _showMessage(
+        'Recording is active, but Android notifications are disabled. '
+        'Enable them in app settings to see the tracking notice.',
+      );
+    }
   }
 
   Future<void> _stopRecording() async {
@@ -315,6 +362,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _isRecording = false;
     });
     await _saveProjects();
+    await _startLocation();
   }
 
   Future<void> _selectProject(String id) async {
