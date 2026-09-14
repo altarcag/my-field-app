@@ -438,6 +438,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
                   ],
                 ),
                 const SizedBox(height: 8),
+                if (_projects.isNotEmpty)
+                  const Text('Long-press a project for options'),
                 if (_projects.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 30),
@@ -463,6 +465,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
                             '${project.pointCount} GPS points · ${project.logs.length} logs',
                           ),
                           trailing: selected ? const Icon(Icons.check) : null,
+                          onLongPress: () => Navigator.pop(
+                            sheetContext, 'options:${project.id}',
+                          ),
                           onTap: () {
                             Navigator.pop(sheetContext, project.id);
                           },
@@ -480,8 +485,100 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
     if (!mounted || selection == null) return;
     if (selection == 'create') {
       await _createProject();
+    } else if (selection.startsWith('options:')) {
+      await _projectOptions(selection.substring(8));
     } else {
       await _selectProject(selection);
+    }
+  }
+
+  Future<void> _projectOptions(String projectId) async {
+    final matches = _projects.where((project) => project.id == projectId);
+    if (matches.isEmpty) return;
+    final project = matches.first;
+    final route = DialogRoute<bool>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text(project.name),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const ListTile(
+              leading: Icon(Icons.delete_outline),
+              title: Text('Delete project'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    final delete = await Navigator.of(context).push(route);
+    await route.completed;
+    if (delete != true || !mounted) return;
+    if (_isAddingLog || _isExporting) {
+      _showMessage('Finish adding or exporting logs before deleting a project.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete project permanently?'),
+        content: Text(
+          'Delete "${project.name}" and all its routes, marks, and photos? '
+          'This cannot be undone. Exported files will not be deleted.'
+          '${_isRecording && _activeProjectId == projectId ? ' Active recording will stop.' : ''}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete project'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      if (_activeProjectId == projectId && _isRecording) {
+        await _stopRecording();
+      }
+      if (!mounted) return;
+      final removed = _projects.firstWhere((entry) => entry.id == projectId);
+      final wasActive = _activeProjectId == projectId;
+      setState(() {
+        _projects = _projects.where((entry) => entry.id != projectId).toList();
+        if (wasActive) {
+          _activeProjectId = _projects.isEmpty ? null : _projects.first.id;
+          _centerMenuOpen = false;
+        }
+      });
+      try {
+        await _saveProjects();
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _projects = [..._projects, removed];
+            if (wasActive) _activeProjectId = projectId;
+          });
+        }
+        rethrow;
+      }
+      // Remove media only after the project list has been saved successfully.
+      try {
+        await _fieldProjectStore.removeProjectPhotos(projectId);
+      } catch (_) {
+        _showMessage('Project deleted, but some stored photos could not be removed.');
+        return;
+      }
+      _showMessage('Project deleted');
+    } catch (error) {
+      _showMessage('Could not delete project: $error');
     }
   }
 
@@ -789,6 +886,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
       _mapController.move(_flightEnd, _flightEndZoom);
       return;
     }
+    _cameraAnimation.duration = const Duration(milliseconds: 900);
     _cameraAnimation.forward(from: 0);
   }
 
@@ -815,12 +913,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
   }
 
   void _zoomBy(double delta) {
-    _cameraAnimation.stop();
     final camera = _mapController.camera;
-    _mapController.move(
-      camera.center,
-      (camera.zoom + delta).clamp(2.0, 22.0).toDouble(),
-    );
+    final continuingZoom = _cameraAnimation.isAnimating &&
+        _flightStart == _flightEnd;
+    final targetZoom = ((continuingZoom ? _flightEndZoom : camera.zoom) + delta)
+        .clamp(2.0, 22.0).toDouble();
+    _cameraAnimation.stop();
+    _flightStart = camera.center;
+    _flightEnd = camera.center;
+    _flightStartZoom = camera.zoom;
+    _flightEndZoom = targetZoom;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _mapController.move(camera.center, targetZoom);
+      return;
+    }
+    _cameraAnimation.duration = const Duration(milliseconds: 350);
+    _cameraAnimation.forward(from: 0);
   }
 
   Future<void> _openRelevantSettings() async {

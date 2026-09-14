@@ -7,6 +7,15 @@ import 'package:my_field_atlas_android/field_log.dart';
 import 'package:my_field_atlas_android/field_log_widgets.dart';
 
 void main() {
+  test('distance labels switch units at one kilometre', () {
+    expect(formatMapDistance(0), '0 m');
+    expect(formatMapDistance(111.2), '111 m');
+    expect(formatMapDistance(999.9), '999 m');
+    expect(formatMapDistance(1000), '1.00 km');
+    expect(formatMapDistance(1250), '1.25 km');
+    expect(formatMapDistance(12500), '12.50 km');
+  });
+
   test('distance uses meters and takes the short path across the dateline', () {
     expect(distanceToMapCenter(const LatLng(0, 0), const LatLng(0, 0)), 0);
     expect(

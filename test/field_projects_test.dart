@@ -1,7 +1,30 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_field_atlas_android/field_projects.dart';
 
 void main() {
+  test('photo cleanup removes only the selected project folder', () async {
+    final root = await Directory.systemTemp.createTemp('project-deletion-');
+    addTearDown(() => root.delete(recursive: true));
+    final store = FieldProjectStore(storageDirectory: root);
+    final deletedPhoto = File('${root.path}/photos/project-1/image.jpg');
+    final keptPhoto = File('${root.path}/photos/project-2/image.jpg');
+    await deletedPhoto.parent.create(recursive: true);
+    await keptPhoto.parent.create(recursive: true);
+    await deletedPhoto.writeAsString('deleted');
+    await keptPhoto.writeAsString('kept');
+    await store.removeProjectPhotos('project-1');
+    expect(await deletedPhoto.exists(), isFalse);
+    expect(await keptPhoto.readAsString(), 'kept');
+    await store.removeProjectPhotos('project-1');
+    await expectLater(
+      store.removeProjectPhotos('../project-2'),
+      throwsFormatException,
+    );
+    expect(await keptPhoto.exists(), isTrue);
+  });
+
   test('field project round-trips separate GPS track sessions', () {
     final started = DateTime.utc(2026, 9, 13, 8);
     final project = FieldProject(

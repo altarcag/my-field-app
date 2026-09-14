@@ -10,6 +10,10 @@ import 'field_log.dart';
 double distanceToMapCenter(LatLng position, LatLng center) =>
     const Distance(roundResult: false).as(LengthUnit.Meter, position, center);
 
+String formatMapDistance(double meters) => meters < 1000
+    ? '${meters.round().clamp(0, 999)} m'
+    : '${(meters / 1000).toStringAsFixed(2)} km';
+
 class CenterTargetLayer extends StatelessWidget {
   const CenterTargetLayer({
     super.key,
@@ -84,7 +88,7 @@ class CenterTargetLayer extends StatelessWidget {
                   child: Text(
                     origin == null
                         ? 'Distance needs GPS'
-                        : '${distanceToMapCenter(origin, center).round()} m',
+                        : formatMapDistance(distanceToMapCenter(origin, center)),
                     key: const ValueKey('center-distance'),
                     style: const TextStyle(
                       color: Color(0xFF1565C0),

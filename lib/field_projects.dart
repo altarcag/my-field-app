@@ -216,6 +216,14 @@ class FieldProjectStore {
     return relativePath;
   }
 
+  Future<void> removeProjectPhotos(String projectId) async {
+    if (!RegExp(r'^[a-zA-Z0-9_-]+$').hasMatch(projectId)) {
+      throw const FormatException('Invalid project ID');
+    }
+    final folder = Directory(path.join((await directory).path, 'photos', projectId));
+    if (await folder.exists()) await folder.delete(recursive: true);
+  }
+
   Future<void> savePendingPhoto(PendingPhotoLog pending) async {
     final file = File(path.join((await directory).path, 'pending-photo.json'));
     final temporary = File('${file.path}.saving');
