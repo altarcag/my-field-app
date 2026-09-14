@@ -26,12 +26,12 @@ void main() {
       ],
     ))));
     expect(find.text('GPS: 111 m'), findsOneWidget);
-    expect(find.text('Target: 222 m'), findsOneWidget);
+    expect(find.text('Target: 223 m'), findsOneWidget);
     await tester.tap(find.text('Set target'));
     expect(selected, const LatLng(0, 0));
     controller.move(const LatLng(0, 0.001), 16);
     await tester.pumpAndSettle();
-    expect(find.text('GPS: 222 m'), findsOneWidget);
+    expect(find.text('GPS: 223 m'), findsOneWidget);
     expect(find.text('Target: 111 m'), findsOneWidget);
     await tester.tap(find.byTooltip('Clear target'));
     expect(cleared, isTrue);
