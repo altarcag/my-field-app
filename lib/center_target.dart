@@ -33,15 +33,17 @@ class CenterTargetLayer extends StatelessWidget {
       children: [
         if (origin != null)
           IgnorePointer(
-            child: PolylineLayer(polylines: [
-              Polyline(
-                points: [origin, center],
-                color: const Color(0xFF1878ED),
-                strokeWidth: 3,
-                borderColor: Colors.white,
-                borderStrokeWidth: 1,
-              ),
-            ]),
+            child: PolylineLayer(
+              polylines: [
+                Polyline(
+                  points: [origin, center],
+                  color: const Color(0xFF1878ED),
+                  strokeWidth: 3,
+                  borderColor: Colors.white,
+                  borderStrokeWidth: 1,
+                ),
+              ],
+            ),
           ),
         Center(
           child: SizedBox.square(
@@ -51,12 +53,15 @@ class CenterTargetLayer extends StatelessWidget {
               tooltip: 'Add a log at map center',
               onPressed: onToggleMenu,
               icon: Container(
-                width: 16, height: 16,
+                width: 16,
+                height: 16,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: Colors.white,
                   border: Border.all(color: const Color(0xFF37474F), width: 3),
-                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 3),
+                  ],
                 ),
               ),
             ),
@@ -72,14 +77,18 @@ class CenterTargetLayer extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   child: Text(
                     origin == null
                         ? 'Distance needs GPS'
                         : '${distanceToMapCenter(origin, center).round()} m',
                     key: const ValueKey('center-distance'),
                     style: const TextStyle(
-                      color: Color(0xFF1565C0), fontWeight: FontWeight.w700,
+                      color: Color(0xFF1565C0),
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -110,30 +119,35 @@ class CenterTargetLayer extends StatelessWidget {
                               '${center.longitude.toStringAsFixed(6)}',
                               style: Theme.of(context).textTheme.labelMedium,
                             ),
-                            Row(children: [
-                              for (final kind in FieldLogKind.values)
-                                Expanded(
-                                  child: TextButton(
-                                    onPressed: () => onCreate(kind, center),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(switch (kind) {
-                                          FieldLogKind.waypoint => Icons.add_location_alt_outlined,
-                                          FieldLogKind.text => Icons.text_fields,
-                                          FieldLogKind.photo => Icons.add_a_photo_outlined,
-                                        }),
-                                        const SizedBox(height: 4),
-                                        Text(switch (kind) {
-                                          FieldLogKind.waypoint => 'Waypoint',
-                                          FieldLogKind.text => 'Text',
-                                          FieldLogKind.photo => 'Photo',
-                                        }),
-                                      ],
+                            Row(
+                              children: [
+                                for (final kind in FieldLogKind.values)
+                                  Expanded(
+                                    child: TextButton(
+                                      onPressed: () => onCreate(kind, center),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(switch (kind) {
+                                            FieldLogKind.waypoint =>
+                                              Icons.add_location_alt_outlined,
+                                            FieldLogKind.text =>
+                                              Icons.text_fields,
+                                            FieldLogKind.photo =>
+                                              Icons.add_a_photo_outlined,
+                                          }),
+                                          const SizedBox(height: 4),
+                                          Text(switch (kind) {
+                                            FieldLogKind.waypoint => 'Waypoint',
+                                            FieldLogKind.text => 'Text',
+                                            FieldLogKind.photo => 'Photo',
+                                          }),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
-                            ]),
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -141,7 +155,8 @@ class CenterTargetLayer extends StatelessWidget {
                     ClipPath(
                       clipper: _BalloonTail(),
                       child: Container(
-                        width: 20, height: 10,
+                        width: 20,
+                        height: 10,
                         color: Theme.of(context).colorScheme.surface,
                       ),
                     ),

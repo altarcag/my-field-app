@@ -15,8 +15,11 @@ class FieldLogDraft {
 
 class FieldLogDialog extends StatefulWidget {
   const FieldLogDialog({
-    super.key, required this.kind, required this.projectName,
-    required this.latitude, required this.longitude,
+    super.key,
+    required this.kind,
+    required this.projectName,
+    required this.latitude,
+    required this.longitude,
   });
   final FieldLogKind kind;
   final String projectName;
@@ -43,9 +46,14 @@ class _FieldLogDialogState extends State<FieldLogDialog> {
   void _submit() {
     if (!_form.currentState!.validate()) return;
     final title = _title.text.trim();
-    Navigator.pop(context, FieldLogDraft(
-      title.isEmpty ? 'Photo log' : title, _notes.text.trim(), _source,
-    ));
+    Navigator.pop(
+      context,
+      FieldLogDraft(
+        title.isEmpty ? 'Photo log' : title,
+        _notes.text.trim(),
+        _source,
+      ),
+    );
   }
 
   @override
@@ -64,38 +72,59 @@ class _FieldLogDialogState extends State<FieldLogDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(widget.projectName, style: Theme.of(context).textTheme.labelLarge),
-              Text('${widget.latitude.toStringAsFixed(6)}, '
-                  '${widget.longitude.toStringAsFixed(6)}'),
+              Text(
+                widget.projectName,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                '${widget.latitude.toStringAsFixed(6)}, '
+                '${widget.longitude.toStringAsFixed(6)}',
+              ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _title,
                 autofocus: !photo,
                 maxLength: 160,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(labelText: widget.kind == FieldLogKind.text
-                    ? 'Text shown on the map' : photo ? 'Title (optional)' : 'Waypoint name'),
+                decoration: InputDecoration(
+                  labelText: widget.kind == FieldLogKind.text
+                      ? 'Text shown on the map'
+                      : photo
+                      ? 'Title (optional)'
+                      : 'Waypoint name',
+                ),
                 validator: (value) => !photo && (value?.trim().isEmpty ?? true)
                     ? 'Enter ${widget.kind == FieldLogKind.text ? 'a text label' : 'a name'}'
                     : null,
               ),
               TextFormField(
                 controller: _notes,
-                minLines: 2, maxLines: 5, maxLength: 10000,
+                minLines: 2,
+                maxLines: 5,
+                maxLength: 10000,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(labelText: 'Notes (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Notes (optional)',
+                ),
               ),
               if (photo) ...[
                 const SizedBox(height: 8),
                 SegmentedButton<ImageSource>(
                   segments: const [
-                    ButtonSegment(value: ImageSource.camera,
-                      icon: Icon(Icons.camera_alt_outlined), label: Text('Camera')),
-                    ButtonSegment(value: ImageSource.gallery,
-                      icon: Icon(Icons.photo_library_outlined), label: Text('Gallery')),
+                    ButtonSegment(
+                      value: ImageSource.camera,
+                      icon: Icon(Icons.camera_alt_outlined),
+                      label: Text('Camera'),
+                    ),
+                    ButtonSegment(
+                      value: ImageSource.gallery,
+                      icon: Icon(Icons.photo_library_outlined),
+                      label: Text('Gallery'),
+                    ),
                   ],
                   selected: {_source},
-                  onSelectionChanged: (value) => setState(() => _source = value.single),
+                  onSelectionChanged: (value) =>
+                      setState(() => _source = value.single),
                 ),
               ],
             ],
@@ -103,15 +132,26 @@ class _FieldLogDialogState extends State<FieldLogDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: _submit, child: Text(photo ? 'Choose photo' : 'Save')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(photo ? 'Choose photo' : 'Save'),
+        ),
       ],
     );
   }
 }
 
 class FieldLogPhoto extends StatefulWidget {
-  const FieldLogPhoto({super.key, required this.store, required this.path, this.thumbnail = false});
+  const FieldLogPhoto({
+    super.key,
+    required this.store,
+    required this.path,
+    this.thumbnail = false,
+  });
   final FieldProjectStore store;
   final String path;
   final bool thumbnail;
@@ -127,6 +167,7 @@ class _FieldLogPhotoState extends State<FieldLogPhoto> {
     super.initState();
     _file = widget.store.photoFile(widget.path);
   }
+
   @override
   void didUpdateWidget(FieldLogPhoto oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -134,13 +175,15 @@ class _FieldLogPhotoState extends State<FieldLogPhoto> {
       _file = widget.store.photoFile(widget.path);
     }
   }
+
   @override
   Widget build(BuildContext context) => FutureBuilder<File>(
     future: _file,
     builder: (context, snapshot) {
       if (!snapshot.hasData) return const Icon(Icons.photo_outlined);
       return Image.file(
-        snapshot.data!, fit: widget.thumbnail ? BoxFit.cover : BoxFit.contain,
+        snapshot.data!,
+        fit: widget.thumbnail ? BoxFit.cover : BoxFit.contain,
         width: widget.thumbnail ? 52 : null,
         height: widget.thumbnail ? 52 : null,
         cacheWidth: widget.thumbnail ? 160 : 1600,
@@ -151,7 +194,12 @@ class _FieldLogPhotoState extends State<FieldLogPhoto> {
 }
 
 class FieldLogMarker extends StatelessWidget {
-  const FieldLogMarker({super.key, required this.log, required this.store, required this.onTap});
+  const FieldLogMarker({
+    super.key,
+    required this.log,
+    required this.store,
+    required this.onTap,
+  });
   final FieldLog log;
   final FieldProjectStore store;
   final VoidCallback onTap;
@@ -168,14 +216,21 @@ class FieldLogMarker extends StatelessWidget {
           children: [
             if (log.kind == FieldLogKind.photo && log.photoPath != null)
               Container(
-                width: 58, height: 58,
+                width: 58,
+                height: 58,
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.white, width: 3),
                   borderRadius: BorderRadius.circular(8),
-                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 4),
+                  ],
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: FieldLogPhoto(store: store, path: log.photoPath!, thumbnail: true),
+                child: FieldLogPhoto(
+                  store: store,
+                  path: log.photoPath!,
+                  thumbnail: true,
+                ),
               )
             else if (log.kind == FieldLogKind.waypoint)
               const Icon(Icons.location_on, color: Color(0xFF9A3655), size: 32),
@@ -186,11 +241,15 @@ class FieldLogMarker extends StatelessWidget {
                   color: Colors.white.withValues(alpha: 0.94),
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text(log.title,
+                child: Text(
+                  log.title,
                   maxLines: log.kind == FieldLogKind.text ? 3 : 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),

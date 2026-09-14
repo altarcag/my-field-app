@@ -23,14 +23,25 @@ class FieldLog {
   final String? photoPath;
 
   FieldLog withPhoto(String path) => FieldLog(
-    id: id, kind: kind, latitude: latitude, longitude: longitude,
-    title: title, notes: notes, createdAt: createdAt, photoPath: path,
+    id: id,
+    kind: kind,
+    latitude: latitude,
+    longitude: longitude,
+    title: title,
+    notes: notes,
+    createdAt: createdAt,
+    photoPath: path,
   );
 
   Map<String, Object?> toJson() => {
-    'id': id, 'kind': kind.name, 'latitude': latitude, 'longitude': longitude,
-    'title': title, 'notes': notes,
-    'createdAt': createdAt.toUtc().toIso8601String(), 'photoPath': photoPath,
+    'id': id,
+    'kind': kind.name,
+    'latitude': latitude,
+    'longitude': longitude,
+    'title': title,
+    'notes': notes,
+    'createdAt': createdAt.toUtc().toIso8601String(),
+    'photoPath': photoPath,
   };
 
   factory FieldLog.fromJson(Map<String, Object?> json) => FieldLog(
@@ -53,11 +64,13 @@ class PendingPhotoLog {
   final FieldLog log;
 
   Map<String, Object?> toJson() => {
-    'projectId': projectId, 'log': log.toJson(),
+    'projectId': projectId,
+    'log': log.toJson(),
   };
 
-  factory PendingPhotoLog.fromJson(Map<String, Object?> json) => PendingPhotoLog(
-    projectId: json['projectId']! as String,
-    log: FieldLog.fromJson((json['log']! as Map).cast<String, Object?>()),
-  );
+  factory PendingPhotoLog.fromJson(Map<String, Object?> json) =>
+      PendingPhotoLog(
+        projectId: json['projectId']! as String,
+        log: FieldLog.fromJson((json['log']! as Map).cast<String, Object?>()),
+      );
 }

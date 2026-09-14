@@ -29,7 +29,9 @@ String projectToKml(FieldProject project, {bool includeLogs = false}) {
     ..writeln('  <Document>')
     ..writeln('    <name>${_xml(project.name)}</name>')
     ..writeln('    <Style id="gps-track">')
-    ..writeln('      <LineStyle><color>ff55369a</color><width>4</width></LineStyle>')
+    ..writeln(
+      '      <LineStyle><color>ff55369a</color><width>4</width></LineStyle>',
+    )
     ..writeln('    </Style>')
     ..writeln('    <Style id="gps-point">')
     ..writeln('      <IconStyle><scale>0.8</scale></IconStyle>')
@@ -61,9 +63,7 @@ String projectToKml(FieldProject project, {bool includeLogs = false}) {
         ..writeln('        <styleUrl>#gps-point</styleUrl>')
         ..writeln('        <Point>')
         ..writeln('          <altitudeMode>absolute</altitudeMode>')
-        ..writeln(
-          '          <coordinates>${_coordinate(point)}</coordinates>',
-        )
+        ..writeln('          <coordinates>${_coordinate(point)}</coordinates>')
         ..writeln('        </Point>');
     } else {
       buffer
@@ -85,12 +85,16 @@ String projectToKml(FieldProject project, {bool includeLogs = false}) {
   buffer.writeln('    </Folder>');
   if (includeLogs) {
     buffer
-      ..writeln('<Style id="field-text"><IconStyle><scale>0</scale></IconStyle>'
-          '<LabelStyle><color>ff2e4235</color><scale>1.1</scale></LabelStyle></Style>')
+      ..writeln(
+        '<Style id="field-text"><IconStyle><scale>0</scale></IconStyle>'
+        '<LabelStyle><color>ff2e4235</color><scale>1.1</scale></LabelStyle></Style>',
+      )
       ..writeln('<Folder><name>Field logs</name>');
     for (final log in project.logs) {
       final photo = log.photoPath == null ? null : _photoArchivePath(log);
-      final html = StringBuffer('<p>${_xml(log.notes).replaceAll('\n', '<br/>')}</p>');
+      final html = StringBuffer(
+        '<p>${_xml(log.notes).replaceAll('\n', '<br/>')}</p>',
+      );
       if (photo != null) {
         html.write('<img src="$photo" width="1200" alt="${_xml(log.title)}"/>');
       }
@@ -98,16 +102,22 @@ String projectToKml(FieldProject project, {bool includeLogs = false}) {
         ..writeln('<Placemark>')
         ..writeln('<name>${_xml(log.title)}</name>')
         ..writeln('<description>${_xml(html.toString())}</description>')
-        ..writeln('<TimeStamp><when>${log.createdAt.toUtc().toIso8601String()}</when></TimeStamp>');
+        ..writeln(
+          '<TimeStamp><when>${log.createdAt.toUtc().toIso8601String()}</when></TimeStamp>',
+        );
       if (log.kind == FieldLogKind.text) {
         buffer.writeln('<styleUrl>#field-text</styleUrl>');
       }
       buffer
-        ..writeln('<ExtendedData><Data name="kind"><value>${log.kind.name}</value></Data>'
-          '<Data name="logId"><value>${_xml(log.id)}</value></Data></ExtendedData>')
-        ..writeln('<Point><altitudeMode>clampToGround</altitudeMode><coordinates>'
+        ..writeln(
+          '<ExtendedData><Data name="kind"><value>${log.kind.name}</value></Data>'
+          '<Data name="logId"><value>${_xml(log.id)}</value></Data></ExtendedData>',
+        )
+        ..writeln(
+          '<Point><altitudeMode>clampToGround</altitudeMode><coordinates>'
           '${log.longitude.toStringAsFixed(8)},${log.latitude.toStringAsFixed(8)}'
-          '</coordinates></Point>')
+          '</coordinates></Point>',
+        )
         ..writeln('</Placemark>');
     }
     buffer.writeln('</Folder>');
@@ -124,9 +134,14 @@ String _photoArchivePath(FieldLog log) {
   return 'photos/${Uri.encodeComponent(log.id)}-${Uri.encodeComponent(name)}';
 }
 
-Uint8List projectToKmz(FieldProject project, {Map<String, Uint8List> photos = const {}}) {
+Uint8List projectToKmz(
+  FieldProject project, {
+  Map<String, Uint8List> photos = const {},
+}) {
   final archive = Archive()
-    ..addFile(ArchiveFile.string('doc.kml', projectToKml(project, includeLogs: true)));
+    ..addFile(
+      ArchiveFile.string('doc.kml', projectToKml(project, includeLogs: true)),
+    );
   final added = <String>{};
   for (final log in project.logs) {
     if (log.kind == FieldLogKind.photo && log.photoPath == null) {
@@ -138,7 +153,8 @@ Uint8List projectToKmz(FieldProject project, {Map<String, Uint8List> photos = co
       throw StateError('Photo missing for "${log.title}". Export cancelled.');
     }
     final name = _photoArchivePath(log);
-    if (added.add(name)) archive.addFile(ArchiveFile(name, bytes.length, bytes));
+    if (added.add(name))
+      archive.addFile(ArchiveFile(name, bytes.length, bytes));
   }
   return Uint8List.fromList(ZipEncoder().encode(archive));
 }

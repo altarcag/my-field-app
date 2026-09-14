@@ -161,12 +161,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       accuracy: LocationAccuracy.bestForNavigation,
       distanceFilter: 0,
     );
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: settings,
-    ).listen(
-      _handlePosition,
-      onError: (Object error) => _setLocationError('GPS error: $error'),
-    );
+    _positionSubscription =
+        Geolocator.getPositionStream(locationSettings: settings).listen(
+          _handlePosition,
+          onError: (Object error) => _setLocationError('GPS error: $error'),
+        );
   }
 
   void _handlePosition(Position position) {
@@ -280,10 +279,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
     final project = _projects[projectIndex];
     final updatedProjects = [..._projects];
-    updatedProjects[projectIndex] = project.withTracks(
-      [...project.tracks, track],
-      now,
-    );
+    updatedProjects[projectIndex] = project.withTracks([
+      ...project.tracks,
+      track,
+    ], now);
     setState(() {
       _projects = updatedProjects;
       _activeTrackId = track.id;
@@ -406,7 +405,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               if (_projects.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 30),
-                  child: Text('Create a project to collect routes and field logs.'),
+                  child: Text(
+                    'Create a project to collect routes and field logs.',
+                  ),
                 )
               else
                 Flexible(
@@ -457,22 +458,30 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       final draft = await showDialog<FieldLogDraft>(
         context: context,
         builder: (_) => FieldLogDialog(
-          kind: kind, projectName: project.name,
-          latitude: target.latitude, longitude: target.longitude,
+          kind: kind,
+          projectName: project.name,
+          latitude: target.latitude,
+          longitude: target.longitude,
         ),
       );
       if (draft == null || !mounted) return;
       final now = DateTime.now().toUtc();
       final log = FieldLog(
-        id: 'log-${now.microsecondsSinceEpoch}', kind: kind,
-        latitude: target.latitude, longitude: target.longitude,
-        title: draft.title, notes: draft.notes, createdAt: now,
+        id: 'log-${now.microsecondsSinceEpoch}',
+        kind: kind,
+        latitude: target.latitude,
+        longitude: target.longitude,
+        title: draft.title,
+        notes: draft.notes,
+        createdAt: now,
       );
       if (kind == FieldLogKind.photo) {
         final pending = PendingPhotoLog(projectId: project.id, log: log);
         await _fieldProjectStore.savePendingPhoto(pending);
         final picked = await ImagePicker().pickImage(
-          source: draft.source, imageQuality: 92, requestFullMetadata: false,
+          source: draft.source,
+          imageQuality: 92,
+          requestFullMetadata: false,
         );
         if (picked == null) {
           await _fieldProjectStore.clearPendingPhoto();
@@ -493,7 +502,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<void> _saveFieldLog(String projectId, FieldLog log) async {
     if (!mounted) return;
     final index = _projects.indexWhere((project) => project.id == projectId);
-    if (index < 0) throw StateError('The original field project is unavailable');
+    if (index < 0)
+      throw StateError('The original field project is unavailable');
     // Read the latest project here so GPS points recorded during entry survive.
     final project = _projects[index];
     final logs = [...project.logs.where((entry) => entry.id != log.id), log];
@@ -506,10 +516,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<void> _finishPhotoLog(PendingPhotoLog pending, XFile photo) async {
     if (!mounted) return;
     final relativePath = await _fieldProjectStore.importPhoto(
-      pending.projectId, pending.log.id, File(photo.path),
+      pending.projectId,
+      pending.log.id,
+      File(photo.path),
     );
     if (!mounted) return;
-    await _saveFieldLog(pending.projectId, pending.log.withPhoto(relativePath));
+    final storedLog = pending.log.withPhoto(relativePath);
+    await _fieldProjectStore.savePendingPhoto(
+      PendingPhotoLog(projectId: pending.projectId, log: storedLog),
+    );
+    await _saveFieldLog(pending.projectId, storedLog);
     await _fieldProjectStore.clearPendingPhoto();
   }
 
@@ -519,6 +535,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     try {
       final response = await ImagePicker().retrieveLostData();
       final pending = await _fieldProjectStore.loadPendingPhoto();
+      // A completed copy may still need to be committed if a previous save
+      // failed or Android stopped the app between copying and saving JSON.
+      if (pending?.log.photoPath != null) {
+        await _saveFieldLog(pending!.projectId, pending.log);
+        await _fieldProjectStore.clearPendingPhoto();
+        _showMessage('Recovered photo in its original field project');
+        return;
+      }
       if (response.isEmpty) return;
       final files = response.files;
       if (pending != null && files != null && files.isNotEmpty) {
@@ -527,7 +551,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       } else if (response.exception != null) {
         _showMessage('Photo capture was interrupted. Please try again.');
       } else if (files != null && files.isNotEmpty) {
-        _showMessage('Photo location could not be recovered. Please add it again.');
+        _showMessage(
+          'Photo location could not be recovered. Please add it again.',
+        );
       }
     } catch (error) {
       _showMessage('Could not recover photo: $error');
@@ -547,10 +573,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           children: [
             if (log.photoPath != null) ...[
               SizedBox(
-                width: 300, height: 300,
+                width: 300,
+                height: 300,
                 child: InteractiveViewer(
                   maxScale: 5,
-                  child: FieldLogPhoto(store: _fieldProjectStore, path: log.photoPath!),
+                  child: FieldLogPhoto(
+                    store: _fieldProjectStore,
+                    path: log.photoPath!,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -559,13 +589,20 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               Text(log.notes),
               const SizedBox(height: 12),
             ],
-            SelectableText('${log.latitude.toStringAsFixed(6)}, '
-                '${log.longitude.toStringAsFixed(6)}'),
+            SelectableText(
+              '${log.latitude.toStringAsFixed(6)}, '
+              '${log.longitude.toStringAsFixed(6)}',
+            ),
             Text(log.createdAt.toLocal().toString().split('.').first),
           ],
         ),
       ),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
     ),
   );
 
@@ -609,7 +646,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     // Snapshot at confirmation time, including points captured while choosing.
     final snapshot = _projects.firstWhere((item) => item.id == project.id);
     if (format == ProjectExportFormat.kml && snapshot.pointCount == 0) {
-      _showMessage('This project has no GPS route yet. Use KMZ to export its logs.');
+      _showMessage(
+        'This project has no GPS route yet. Use KMZ to export its logs.',
+      );
       return;
     }
     setState(() => _isExporting = true);
@@ -621,7 +660,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         fileName: fileName,
         type: FileType.custom,
         allowedExtensions: [format.name],
-        bytes: await projectExportBytes(snapshot, format, store: _fieldProjectStore),
+        bytes: await projectExportBytes(
+          snapshot,
+          format,
+          store: _fieldProjectStore,
+        ),
       );
       if (result != null) _showMessage('Exported $fileName');
     } catch (error) {
@@ -635,6 +678,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() {
       _isLocating = false;
+      _position = null;
       _locationStatus = message;
     });
   }
@@ -681,10 +725,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (active != null) await _activateMap(active, persist: false);
   }
 
-  Future<void> _activateMap(
-    InstalledMap? map, {
-    bool persist = true,
-  }) async {
+  Future<void> _activateMap(InstalledMap? map, {bool persist = true}) async {
     MbTilesTileProvider? provider;
     if (map != null) {
       try {
@@ -842,7 +883,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                         width: log.kind == FieldLogKind.text ? 170 : 120,
                         height: log.kind == FieldLogKind.photo ? 84 : 64,
                         child: FieldLogMarker(
-                          log: log, store: _fieldProjectStore,
+                          log: log,
+                          store: _fieldProjectStore,
                           onTap: () => _viewFieldLog(log),
                         ),
                       ),
@@ -1052,10 +1094,14 @@ class _ProjectTrackingControl extends StatelessWidget {
               const SizedBox(width: 2),
               IconButton(
                 onPressed: (project?.hasContent ?? false) && !isExporting
-                    ? onExport : null,
+                    ? onExport
+                    : null,
                 tooltip: 'Export project',
                 icon: isExporting
-                    ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.file_download_outlined),
               ),
               const SizedBox(width: 2),
@@ -1064,15 +1110,15 @@ class _ProjectTrackingControl extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   minimumSize: const Size(0, 46),
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  backgroundColor: isRecording
-                      ? colors.error
-                      : colors.primary,
+                  backgroundColor: isRecording ? colors.error : colors.primary,
                 ),
                 icon: Icon(
                   isRecording ? Icons.stop_rounded : Icons.route_outlined,
                   size: 20,
                 ),
-                label: Text(isRecording ? 'Stop' : 'Record'),
+                label: MediaQuery.sizeOf(context).width < 380
+                    ? const SizedBox.shrink()
+                    : Text(isRecording ? 'Stop' : 'Record'),
               ),
             ],
           ),
@@ -1083,10 +1129,7 @@ class _ProjectTrackingControl extends StatelessWidget {
 }
 
 class _NorthControl extends StatelessWidget {
-  const _NorthControl({
-    required this.rotation,
-    required this.onPressed,
-  });
+  const _NorthControl({required this.rotation, required this.onPressed});
 
   final ValueNotifier<double> rotation;
   final VoidCallback onPressed;
@@ -1104,9 +1147,7 @@ class _NorthControl extends StatelessWidget {
             color: colors.surface.withValues(alpha: 0.96),
             elevation: 3,
             shadowColor: Colors.black26,
-            shape: CircleBorder(
-              side: BorderSide(color: colors.outlineVariant),
-            ),
+            shape: CircleBorder(side: BorderSide(color: colors.outlineVariant)),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: onPressed,
@@ -1173,11 +1214,7 @@ class _CompassNeedlePainter extends CustomPainter {
     canvas.drawPath(north, Paint()..color = const Color(0xFF9A3655));
     canvas.drawPath(south, Paint()..color = const Color(0xFF66717C));
     canvas.drawCircle(center, 2.1, Paint()..color = Colors.white);
-    canvas.drawCircle(
-      center,
-      1.15,
-      Paint()..color = const Color(0xFF35424D),
-    );
+    canvas.drawCircle(center, 1.15, Paint()..color = const Color(0xFF35424D));
   }
 
   @override
