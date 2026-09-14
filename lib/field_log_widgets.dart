@@ -259,3 +259,49 @@ class FieldLogMarker extends StatelessWidget {
     );
   }
 }
+
+
+/// Owns its controller until Flutter removes the dialog from the widget tree.
+class ProjectNameDialog extends StatefulWidget {
+  const ProjectNameDialog({super.key});
+
+  @override
+  State<ProjectNameDialog> createState() => _ProjectNameDialogState();
+}
+
+class _ProjectNameDialogState extends State<ProjectNameDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isNotEmpty) Navigator.pop(context, name);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('New field project'),
+    content: TextField(
+      controller: _controller,
+      autofocus: true,
+      textCapitalization: TextCapitalization.words,
+      decoration: const InputDecoration(
+        labelText: 'Project name',
+        hintText: 'Cappadocia — September 2026',
+      ),
+      onSubmitted: (_) => _submit(),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _submit, child: const Text('Create')),
+    ],
+  );
+}

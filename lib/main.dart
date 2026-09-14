@@ -374,42 +374,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _createProject() async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
+    final route = DialogRoute<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('New field project'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Project name',
-            hintText: 'Cappadocia — September 2026',
-          ),
-          onSubmitted: (value) {
-            final trimmed = value.trim();
-            if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final trimmed = controller.text.trim();
-              if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
+      builder: (_) => const ProjectNameDialog(),
     );
-    controller.dispose();
+    final name = await Navigator.of(context).push(route);
+    await route.completed;
     if (name == null || !mounted) return;
     if (_isRecording) await _stopRecording();
+    if (!mounted) return;
     final now = DateTime.now().toUtc();
     final project = FieldProject(
       id: 'project-${now.microsecondsSinceEpoch}',
@@ -426,70 +399,79 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openProjectPicker() async {
-    final createNew = await showModalBottomSheet<bool>(
+    ModalRoute<dynamic>? pickerRoute;
+    final selection = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
+      builder: (sheetContext) {
+        pickerRoute = ModalRoute.of(sheetContext);
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Field projects',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () => Navigator.pop(sheetContext, 'create'),
+                      icon: const Icon(Icons.create_new_folder_outlined),
+                      label: const Text('New'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (_projects.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 30),
                     child: Text(
-                      'Field projects',
-                      style: Theme.of(context).textTheme.titleLarge,
+                      'Create a project to collect routes and field logs.',
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _projects.length,
+                      itemBuilder: (context, index) {
+                        final project = _projects[index];
+                        final selected = project.id == _activeProjectId;
+                        return ListTile(
+                          leading: Icon(
+                            selected ? Icons.folder : Icons.folder_outlined,
+                          ),
+                          title: Text(project.name),
+                          subtitle: Text(
+                            '${project.tracks.length} tracks · '
+                            '${project.pointCount} GPS points · ${project.logs.length} logs',
+                          ),
+                          trailing: selected ? const Icon(Icons.check) : null,
+                          onTap: () {
+                            Navigator.pop(sheetContext, project.id);
+                          },
+                        );
+                      },
                     ),
                   ),
-                  FilledButton.icon(
-                    onPressed: () => Navigator.pop(sheetContext, true),
-                    icon: const Icon(Icons.create_new_folder_outlined),
-                    label: const Text('New'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (_projects.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 30),
-                  child: Text(
-                    'Create a project to collect routes and field logs.',
-                  ),
-                )
-              else
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _projects.length,
-                    itemBuilder: (context, index) {
-                      final project = _projects[index];
-                      final selected = project.id == _activeProjectId;
-                      return ListTile(
-                        leading: Icon(
-                          selected ? Icons.folder : Icons.folder_outlined,
-                        ),
-                        title: Text(project.name),
-                        subtitle: Text(
-                          '${project.tracks.length} tracks · '
-                          '${project.pointCount} GPS points · ${project.logs.length} logs',
-                        ),
-                        trailing: selected ? const Icon(Icons.check) : null,
-                        onTap: () {
-                          Navigator.pop(sheetContext);
-                          unawaited(_selectProject(project.id));
-                        },
-                      );
-                    },
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
-    if (createNew == true && mounted) await _createProject();
+    await pickerRoute?.completed;
+    if (!mounted || selection == null) return;
+    if (selection == 'create') {
+      await _createProject();
+    } else {
+      await _selectProject(selection);
+    }
   }
 
   Future<void> _addFieldLog(FieldLogKind kind, LatLng target) async {
@@ -612,49 +594,96 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _viewFieldLog(FieldLog log) => showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(log.title),
-      content: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (log.photoPath != null) ...[
-              SizedBox(
-                width: 300,
-                height: 300,
-                child: InteractiveViewer(
-                  maxScale: 5,
-                  child: FieldLogPhoto(
-                    store: _fieldProjectStore,
-                    path: log.photoPath!,
+  Future<void> _viewFieldLog(FieldLog log) async {
+    final projectId = _activeProjectId;
+    if (projectId == null) return;
+    final route = DialogRoute<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(log.title),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (log.photoPath != null) ...[
+                SizedBox(
+                  width: 300,
+                  height: 300,
+                  child: InteractiveViewer(
+                    maxScale: 5,
+                    child: FieldLogPhoto(
+                      store: _fieldProjectStore,
+                      path: log.photoPath!,
+                    ),
                   ),
                 ),
+                const SizedBox(height: 12),
+              ],
+              if (log.notes.isNotEmpty) ...[
+                Text(log.notes),
+                const SizedBox(height: 12),
+              ],
+              SelectableText(
+                '${log.latitude.toStringAsFixed(6)}, '
+                '${log.longitude.toStringAsFixed(6)}',
               ),
-              const SizedBox(height: 12),
+              Text(log.createdAt.toLocal().toString().split('.').first),
             ],
-            if (log.notes.isNotEmpty) ...[
-              Text(log.notes),
-              const SizedBox(height: 12),
-            ],
-            SelectableText(
-              '${log.latitude.toStringAsFixed(6)}, '
-              '${log.longitude.toStringAsFixed(6)}',
-            ),
-            Text(log.createdAt.toLocal().toString().split('.').first),
-          ],
+          ),
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Close'),
-        ),
-      ],
-    ),
-  );
+    );
+    final remove = await Navigator.of(context).push(route);
+    await route.completed;
+    if (remove != true || !mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete mark?'),
+        content: Text('Remove "${log.title}" from this project? '
+            'Future exports will no longer include it.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final index = _projects.indexWhere((project) => project.id == projectId);
+    if (index < 0) return;
+    // Use the latest state to preserve GPS fixes received during the dialogs.
+    final project = _projects[index];
+    final updated = [..._projects];
+    updated[index] = project.withLogs(
+      project.logs.where((entry) => entry.id != log.id).toList(),
+      DateTime.now().toUtc(),
+    );
+    setState(() => _projects = updated);
+    try {
+      await _saveProjects();
+      _showMessage('Mark deleted');
+    } catch (error) {
+      _showMessage('Could not save deletion: $error');
+    }
+  }
 
   Future<void> _exportActiveProject() async {
     final project = _activeProject;
