@@ -502,8 +502,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<void> _saveFieldLog(String projectId, FieldLog log) async {
     if (!mounted) return;
     final index = _projects.indexWhere((project) => project.id == projectId);
-    if (index < 0)
+    if (index < 0) {
       throw StateError('The original field project is unavailable');
+    }
     // Read the latest project here so GPS points recorded during entry survive.
     final project = _projects[index];
     final logs = [...project.logs.where((entry) => entry.id != log.id), log];

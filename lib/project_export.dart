@@ -153,8 +153,9 @@ Uint8List projectToKmz(
       throw StateError('Photo missing for "${log.title}". Export cancelled.');
     }
     final name = _photoArchivePath(log);
-    if (added.add(name))
+    if (added.add(name)) {
       archive.addFile(ArchiveFile(name, bytes.length, bytes));
+    }
   }
   return Uint8List.fromList(ZipEncoder().encode(archive));
 }
