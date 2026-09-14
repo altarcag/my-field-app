@@ -90,6 +90,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
   bool _isLoadingProjects = true;
   bool _isRecording = false;
   bool _centerMenuOpen = false;
+  bool _followLocation = false;
+  LatLng? _destination;
   bool _isAddingLog = false;
   bool _isExporting = false;
 
@@ -221,6 +223,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
       _locationStatus = 'GPS active';
     });
     _recordPosition(position);
+    if (_followLocation && _didCenterOnFirstFix) {
+      _cameraAnimation.stop();
+      _mapController.move(
+        LatLng(position.latitude, position.longitude),
+        _mapController.camera.zoom,
+      );
+    }
     if (!_didCenterOnFirstFix) {
       _didCenterOnFirstFix = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1081,7 +1090,18 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
                 if (_centerMenuOpen) setState(() => _centerMenuOpen = false);
               },
               onPositionChanged: (camera, hasGesture) {
-                if (hasGesture) _cameraAnimation.stop();
+                if (hasGesture) {
+                  _cameraAnimation.stop();
+                  if (_followLocation && _position != null) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted || !_followLocation || _position == null) return;
+                      _mapController.move(
+                        LatLng(_position!.latitude, _position!.longitude),
+                        _mapController.camera.zoom,
+                      );
+                    });
+                  }
+                }
                 if (hasGesture && _centerMenuOpen) {
                   setState(() => _centerMenuOpen = false);
                 }
@@ -1143,8 +1163,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
                   markers: [
                     Marker(
                       point: point,
-                      width: 34,
-                      height: 34,
+                      width: 24,
+                      height: 24,
                       child: const _LocationMarker(),
                     ),
                   ],
@@ -1152,6 +1172,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
               ],
               CenterTargetLayer(
                 position: point,
+                destination: _destination,
+                onSetDestination: (target) => setState(() {
+                  _destination = target;
+                  _centerMenuOpen = false;
+                }),
+                onClearDestination: () => setState(() {
+                  _destination = null;
+                  _centerMenuOpen = false;
+                }),
                 menuOpen: _centerMenuOpen,
                 onToggleMenu: () {
                   if (_isAddingLog || _isLoadingProjects) return;
@@ -1254,6 +1283,18 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, Sing
             ),
           ),
           const SizedBox(height: 12),
+          FloatingActionButton.small(
+            heroTag: 'follow-location',
+            tooltip: _followLocation ? 'Stop following GPS' : 'Lock center to GPS',
+            backgroundColor: _followLocation
+                ? Theme.of(context).colorScheme.primaryContainer : null,
+            onPressed: () {
+              setState(() => _followLocation = !_followLocation);
+              if (_followLocation) _centerOnPosition();
+            },
+            child: Icon(_followLocation ? Icons.lock : Icons.lock_open),
+          ),
+          const SizedBox(height: 8),
           FloatingActionButton(
             heroTag: 'my-location',
             onPressed: _centerOnPosition,

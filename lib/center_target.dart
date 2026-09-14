@@ -21,9 +21,15 @@ class CenterTargetLayer extends StatelessWidget {
     required this.menuOpen,
     required this.onToggleMenu,
     required this.onCreate,
+    this.destination,
+    this.onSetDestination,
+    this.onClearDestination,
   });
 
   final LatLng? position;
+  final LatLng? destination;
+  final ValueChanged<LatLng>? onSetDestination;
+  final VoidCallback? onClearDestination;
   final bool menuOpen;
   final VoidCallback onToggleMenu;
   final void Function(FieldLogKind, LatLng) onCreate;
@@ -49,6 +55,48 @@ class CenterTargetLayer extends StatelessWidget {
               ],
             ),
           ),
+        if (destination != null) ...[
+          IgnorePointer(
+            child: PolylineLayer(polylines: [
+              Polyline(
+                points: [center, destination!],
+                color: const Color(0xFFC2185B),
+                strokeWidth: 3,
+                borderColor: Colors.white,
+                borderStrokeWidth: 1,
+              ),
+            ]),
+          ),
+          MarkerLayer(rotate: true, markers: [
+            Marker(
+              point: destination!,
+              width: 36,
+              height: 36,
+              child: const Icon(Icons.flag, color: Color(0xFFC2185B), size: 30),
+            ),
+          ]),
+          Center(
+            child: IgnorePointer(
+              child: Transform.translate(
+                offset: const Offset(0, 64),
+                child: Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    child: Text(
+                      'Target: ${formatMapDistance(distanceToMapCenter(center, destination!))}',
+                      key: const ValueKey('target-distance'),
+                      style: const TextStyle(
+                        color: Color(0xFFC2185B), fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
         Center(
           child: SizedBox.square(
             dimension: 48,
@@ -88,7 +136,7 @@ class CenterTargetLayer extends StatelessWidget {
                   child: Text(
                     origin == null
                         ? 'Distance needs GPS'
-                        : formatMapDistance(distanceToMapCenter(origin, center)),
+                        : '${destination == null ? '' : 'GPS: '}${formatMapDistance(distanceToMapCenter(origin, center))}',
                     key: const ValueKey('center-distance'),
                     style: const TextStyle(
                       color: Color(0xFF1565C0),
@@ -103,7 +151,7 @@ class CenterTargetLayer extends StatelessWidget {
         if (menuOpen)
           Center(
             child: Transform.translate(
-              offset: const Offset(0, -96),
+              offset: Offset(0, onSetDestination == null ? -96 : -120),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 290),
                 child: Column(
@@ -123,6 +171,24 @@ class CenterTargetLayer extends StatelessWidget {
                               '${center.longitude.toStringAsFixed(6)}',
                               style: Theme.of(context).textTheme.labelMedium,
                             ),
+                            if (onSetDestination != null)
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextButton.icon(
+                                      onPressed: () => onSetDestination!(center),
+                                      icon: const Icon(Icons.flag_outlined),
+                                      label: const Text('Set target'),
+                                    ),
+                                  ),
+                                  if (destination != null)
+                                    IconButton(
+                                      tooltip: 'Clear target',
+                                      onPressed: onClearDestination,
+                                      icon: const Icon(Icons.clear),
+                                    ),
+                                ],
+                              ),
                             Row(
                               children: [
                                 for (final kind in FieldLogKind.values)
