@@ -284,11 +284,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final updatedProjects = [..._projects];
     updatedProjects[projectIndex] = project.withTracks(updatedTracks, now);
     setState(() => _projects = updatedProjects);
-    _trackSaveTimer?.cancel();
-    _trackSaveTimer = Timer(
-      const Duration(seconds: 2),
-      () => unawaited(_saveProjects()),
-    );
+    if (_trackSaveTimer?.isActive != true) {
+      _trackSaveTimer = Timer(
+        const Duration(seconds: 5),
+        () => unawaited(_saveProjects()),
+      );
+    }
   }
 
   Future<void> _toggleRecording() async {
