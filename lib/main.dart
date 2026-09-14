@@ -60,13 +60,19 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
+class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   static const LatLng _turkeyCenter = LatLng(39.0, 35.0);
   static const MethodChannel _androidPermissions = MethodChannel(
     'com.altarcag.my_field_atlas_android/permissions',
   );
 
   final MapController _mapController = MapController();
+  late final AnimationController _cameraAnimation;
+  LatLng _flightStart = _turkeyCenter;
+  LatLng _flightEnd = _turkeyCenter;
+  double _flightStartZoom = 5.5;
+  double _flightEndZoom = 5.5;
+
   final ValueNotifier<double> _mapRotation = ValueNotifier(0);
   final OfflineMapStore _offlineMaps = OfflineMapStore();
   final FieldProjectStore _fieldProjectStore = FieldProjectStore();
@@ -97,6 +103,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _cameraAnimation = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..addListener(_animateCamera);
     WidgetsBinding.instance.addObserver(this);
     _onlineTileProvider = widget.onlineMapCache.providerFor(_onlineBasemap);
     _startLocation();
@@ -112,6 +122,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _positionSubscription?.cancel();
     _offlineTileProvider?.dispose();
     _onlineTileProvider.dispose();
+    _cameraAnimation.dispose();
     _mapRotation.dispose();
     _mapController.dispose();
     super.dispose();
@@ -768,10 +779,47 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _startLocation();
       return;
     }
-    final currentZoom = _mapController.camera.zoom;
+    _cameraAnimation.stop();
+    final camera = _mapController.camera;
+    _flightStart = camera.center;
+    _flightEnd = LatLng(position.latitude, position.longitude);
+    _flightStartZoom = camera.zoom;
+    _flightEndZoom = math.max(16.0, camera.zoom);
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _mapController.move(_flightEnd, _flightEndZoom);
+      return;
+    }
+    _cameraAnimation.forward(from: 0);
+  }
+
+  void _animateCamera() {
+    final t = Curves.easeInOutCubic.transform(_cameraAnimation.value);
+    // Follow the short longitude path, including across the date line.
+    final deltaLon =
+        (_flightEnd.longitude - _flightStart.longitude + 540) % 360 - 180;
+    final longitude = (_flightStart.longitude + deltaLon * t + 540) % 360 - 180;
     _mapController.move(
-      LatLng(position.latitude, position.longitude),
-      currentZoom < 16 ? 16.0 : currentZoom,
+      LatLng(
+        _flightStart.latitude + (_flightEnd.latitude - _flightStart.latitude) * t,
+        longitude,
+      ),
+      _flightStartZoom + (_flightEndZoom - _flightStartZoom) * t,
+    );
+  }
+
+  void _resetNorth() {
+    _cameraAnimation.stop();
+    _mapController.rotate(0);
+    // Programmatic rotation does not always trigger onPositionChanged.
+    _mapRotation.value = _mapController.camera.rotation;
+  }
+
+  void _zoomBy(double delta) {
+    _cameraAnimation.stop();
+    final camera = _mapController.camera;
+    _mapController.move(
+      camera.center,
+      (camera.zoom + delta).clamp(2.0, 22.0).toDouble(),
     );
   }
 
@@ -925,6 +973,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 if (_centerMenuOpen) setState(() => _centerMenuOpen = false);
               },
               onPositionChanged: (camera, hasGesture) {
+                if (hasGesture) _cameraAnimation.stop();
                 if (hasGesture && _centerMenuOpen) {
                   setState(() => _centerMenuOpen = false);
                 }
@@ -1025,9 +1074,36 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             top: 12,
             right: 12,
             child: SafeArea(
-              child: _NorthControl(
-                rotation: _mapRotation,
-                onPressed: () => _mapController.rotate(0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _NorthControl(
+                    rotation: _mapRotation,
+                    onPressed: _resetNorth,
+                  ),
+                  const SizedBox(height: 8),
+                  Material(
+                    elevation: 3,
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Zoom in',
+                          onPressed: () => _zoomBy(1),
+                          icon: const Icon(Icons.add),
+                        ),
+                        IconButton(
+                          tooltip: 'Zoom out',
+                          onPressed: () => _zoomBy(-1),
+                          icon: const Icon(Icons.remove),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1341,27 +1417,27 @@ class _StatusPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       elevation: 3,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(12),
       color: Colors.white.withValues(alpha: 0.94),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 11, 10, 11),
+        padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (isLocating)
               const SizedBox.square(
-                dimension: 18,
+                dimension: 16,
                 child: CircularProgressIndicator(strokeWidth: 2.5),
               )
             else
               Icon(
                 position == null ? Icons.gps_off : Icons.gps_fixed,
-                size: 20,
+                size: 16,
                 color: position == null
                     ? Theme.of(context).colorScheme.error
                     : const Color(0xFF26734D),
               ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 6),
             Flexible(
               child: position == null
                   ? Column(
@@ -1415,7 +1491,7 @@ class _PositionReadout extends StatelessWidget {
         Text(
           '${position.latitude.toStringAsFixed(6)}, '
           '${position.longitude.toStringAsFixed(6)}',
-          style: textTheme.labelLarge?.copyWith(
+          style: textTheme.labelMedium?.copyWith(
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
@@ -1423,7 +1499,7 @@ class _PositionReadout extends StatelessWidget {
         Text(
           '±${position.accuracy.toStringAsFixed(1)} m   '
           'Altitude ${position.altitude.toStringAsFixed(1)} m',
-          style: textTheme.bodySmall,
+          style: textTheme.bodySmall?.copyWith(fontSize: 11),
         ),
       ],
     );
